@@ -39,6 +39,9 @@ parser.add_argument('--cr2',dest='cr2',action='store_true',
 
 parser.add_argument('--apertures',type=str,required=True,
                     help='A JSON file with list of apertures for photometry')
+
+parser.add_argument('--showplots',dest='showplots',action='store_true',
+                    help='wheter produce plots during processing')
 # output report
 parser.add_argument('--aavso',dest='aavso',action='store_true',
                     help='whether produce an aavso output file')

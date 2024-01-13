@@ -29,13 +29,41 @@ class MYPhot_Core:
      self.preprocessing = args.preprocessing
      self.bias = False
      self.filename = {}
-
+     self.showplots = args.showplots
 
    def do_fits_preprocessing(self):
      """ Perform pre-processing aka bias,dark and flat correction
          of input data in FITS format """
-     pass
 
+     # check if a master bias is already present in the Reduce folder
+     if os.path.isfile(self.workdir+"/Reduced/masterbias.fits"):
+       logger.info("Master Bias already present - skipping master bias creation")
+     else:
+       logger.info("Create Master Bias")
+       bfiles = glob.glob(self.workdir+"BIAS/bais*.fits")
+       bfiles.sort()
+       allbias = []
+       for i,ifile in enumerate(bfiles):
+         logger.info(f"reading bias: {i+1}/{len(bfiles)} - {ifile}")
+         data = fits.getdata(ifile)
+         allbias.append(data)
+
+       # stack bias together
+       allbias = np.stack(allbias)
+       superbias = np.median(allbias,axis=0)
+       fits.writeto(self.workdir+"/Reduced/masterbias.fits",superbias.astype('float32'),overwrite=True)
+    
+     if self.showplots:
+       tvbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
+       plt.figure(figsize=(8,8))
+       plt.imshow(tvbias,origin='lower')
+       plt.colorbar()
+       plt.title("Master Bias derived from bias frames")
+       plt.show(block=False)
+       
+     # check if flat dark is present in the Reduce folder 
+
+     
    def convert_cr2_fits(self):
      """ Perform pre-processing aka bias, dark and flat correction
          of input data in CR2 format """
@@ -187,6 +215,8 @@ class MYPhot_Core:
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
 
+         # add other useful keywords to LIGHT frames
+         hdu.header['OBJECT'] = (self.target[0],'Object Name')
          hdu.writeto(f'{self.workdir}/light_{i+1}.fits',overwrite=True)
 
 

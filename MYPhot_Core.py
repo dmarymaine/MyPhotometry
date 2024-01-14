@@ -62,8 +62,31 @@ class MYPhot_Core:
        plt.show(block=False)
        
      # check if flat dark is present in the Reduce folder 
+     if os.path.isfile(self.workdir+"/Reduced/masterdarkflat.fits"):
+       logger.info("Master Dark Flat already present - skipping creation")
+     else:
+       logger.info("Create Master Dark Flat")
+       dffiles = glob.glob(self.workdir+"DARKFLAT/DarkFlat*.fits")
+       ddfiles.sort()
+       alldarkflats = []
+       for i,ifile in enumerate(dffiles):
+         logger.info(f"reading dark-flat: {i+1}/{len(dffiles)} - {ifile}")
+         data = fits.getdata(ifile)
+         alldarkflats.append(data)
 
-     
+       # stack all dark flats together
+       alldarkflats = np.stack(alldarkflats)
+       mdarkflat = np.median(alldarkflats,axis=0)
+       fits.writeto(self.workdir+"/Reduced/masterdarkflat.fits",mdarkflat.astype('float32'),overwrite=True)
+           
+     if self.showplots:
+       tvdflats = fits.getdata(self.workdir+"/Reduced/masterdarkflat.fits")
+       plt.figure(figsize=(8,8))
+       plt.imshow(tvdflats,origin='lower')
+       plt.colorbar()
+       plt.title("Master Dark-Flat from dark-flat frames")
+       plt.show(block=False)  
+
    def convert_cr2_fits(self):
      """ Perform pre-processing aka bias, dark and flat correction
          of input data in CR2 format """

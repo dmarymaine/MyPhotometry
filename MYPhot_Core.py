@@ -85,7 +85,15 @@ class MYPhot_Core:
        plt.imshow(tvdflats,origin='lower')
        plt.colorbar()
        plt.title("Master Dark-Flat from dark-flat frames")
-       plt.show(block=False)  
+       plt.show(block=False)
+     
+     # now combinte the flats: subtract BIAS and DARKFLAT
+     # normalize the frames and create the master flat
+     if os.path.isfile(self.workdir+"/Reduced/masterflat.fits"):
+       logger.info("Master Flat already exists - skipping creations")
+     else:
+       logger.info("Create Master Flat")
+       ffiles = glob.glob() 
 
    def convert_cr2_fits(self):
      """ Perform pre-processing aka bias, dark and flat correction

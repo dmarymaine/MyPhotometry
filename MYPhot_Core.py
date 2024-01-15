@@ -358,6 +358,96 @@ class MYPhot_Core:
      
      return ra,dec
    
+   def compute_allobject_photometry(self):
+    """ 
+      Compute all objects photometry. For each calibrated frames
+      - detector sources
+      - compute background and errors
+      - defined apertures
+      - get photometry for all objects 
+      - save results to a catalog
+    """
+    logger.info("Computing Aperture Photometry for all the objects")
+    cfiles = glob.glob(f"self.{workdir}/Solved/*.fits")
+    cfiles.sort()
+
+    with open(self.apertures,'r') as f:
+      aper_radii = json.load(f)
+
+    for i,ifile in enumerate(cfiles):
+      logger.info(f"aperture photometry for {i+1}/{len(cfiles)} - {ifile}")
+      rootname,_ = os.path.splitext(ifile)
+      catfile = rootname+'-cat.fits'
+      data = fits.getdata(ifile)
+
+      # mask to get background estimation
+      sigma_clip = SigmaClip(sigma=3.)
+      mask = pht.make_source_mask(data,nsigma=3,npixels=5,dilate_size=11)
+      bkg_estimator = pht.SExtractorBackground()
+      bkg = pht.Background2D(data,(64,64),mask=mask,filter_size=(3,3),sigma_clip=sigma_clip,
+            bkg_estimator=bkg_estimator)
+      daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
+                plo=0.5,sharphi=2.0,roundlo=0.0,roundhi=0.7)
+      sources = daofind(data - bkg.background)
+      positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
+      apert = [pht.CircularAperture(positions,r=r) for r in aper_radii]
+      error = calc_total_error(data-bkg.background,bkg.background_rms,self.gain)
+      aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
+      
+      aper_phot.write(catfile,overwrite=True)
+
+   def get_target_comp_valid_photometry(self):
+     """
+     Get photometry for the target, comparison and validation stars
+     It uses the catalog produced in comput_allobject_photometry
+     and the WCS from the solved light frames.
+     From WCS and T,C and V stars coordinates it gets the (x,y) on the frame
+     and select the nearest object in the catalog
+     It returns arrays for T,C and V with JD and photometry results
+     """
+
+     catfiles = glob.glob(f"{self.workdir}/Solved/*-cat.fits")
+     catfiles.sort()
+
+     with open(self.target,'r') as f:
+        info = json.load(f)
+    
+     target_name = info[0][0]
+     compar_name = info[1][0]
+     valide_name = info[2][0]
+
+     t_coord = SkyCoord([f"{info[0][1]} {info[0][2]}"],frame='fk5',unit=(u.hourangle,u.deg))
+     c_coord = SkyCoord([f"{info[1][1]} {info[1][2]}"],frame='fk5',unit=(u.hourangle,u.deg))
+     v_coord = SkyCoord([f"{info[2][1]} {info[2][2]}"],frame='fk5',unit=(u.hourangle,u.deg))
+
+     with open(self.apertures,'r') as g:
+       aper_radii = json.load(g)
+
+     naper = len(aper_radii)
+     out_target = np.zeros((1+2*naper,len(catfiles)))
+     out_compar = np.zeros((1+2*naper,len(catfiles)))
+     out_valide = np.zeros((1+2*naper,len(catfiles)))
+
+     # 
+     # now loop over the catalogs, read WCS from calibrated frames and get required stars
+     for i,ifile in enumerate(catfiles):
+        logger.info(f"reading catfiles {i+1}/{len(catfiles)} - {ifile}")
+        rootame,_ = os.path.splitext(ifile)
+        #remove the last 4 spaces from file name to get the calibrated frame
+        sciframe = rootname[:-4]
+        # read sci header, create WCS and get (x,y) for T,C and V stars
+        logger.info("creating WCS for the selected catalog")
+        head = fits.getheader(sciframe+".fits")
+        w = WCS(head)
+        x_t,y_t = w.world_to_pixel(t_coord)
+        x_c,y_c = w.world_to_pixel(c_coord)
+        x_v,y_v = w.world_to_pixel(v_coord)
+
+        head_cat = fits.getheader(ifile)
+        datestr = head['DATE-OBS']
+        t = Time(datestr,format='isot',scale='utc')
+
+
    def exec(self):
      """ main point with the actual execution of the main steps.
          if preprocessing has to be executed produce the results

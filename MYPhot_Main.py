@@ -74,6 +74,16 @@ myphot = MYPhot_Core(args)
 
 myphot.exec()
 
+# compute photometry for all objects (creating catalogs)
+myphot.compute_allobject_photometry()
+
+# now create circular apertures around the target, comparison and 
+# validation stars. 
+myphot.get_target_comp_valid_photometry()
+
+# now plot radial profile to check which aperture is optimal
+
+
 
 logger.info("Done")
 

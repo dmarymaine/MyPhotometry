@@ -32,6 +32,9 @@ class MYPhot_Core:
      self.showplots = args.showplots
      self.gain = None
      self.rdnoise = None
+     self.out_target = None
+     self.out_compar = None
+     self.out_valide = None
 
    def do_fits_preprocessing(self):
      """ Perform pre-processing aka bias,dark and flat correction
@@ -446,8 +449,45 @@ class MYPhot_Core:
         head_cat = fits.getheader(ifile)
         datestr = head['DATE-OBS']
         t = Time(datestr,format='isot',scale='utc')
+        jd = t.mjd
+        out_target[0,i] = jd
+        out_compar[0,i] = jd
+        out_valide[0,i] = jd
 
-
+        # now find the nearest to T,C and V star in catalog
+        # Target
+        cat = fits.getdata(ifile)
+        x = cat['xcenter']
+        y = cat['ycenter']
+        d = np.sqrt((x-x_t)**2 + (y-y_t)**2)
+        idx = np.argmin(d)
+        icat=cat[idx]
+        dt = d[idx]
+        if d[idx]<2:
+          for j in range(naper):
+            out_target[j+1,i]=icat['aperture_sum_'+str(j)]
+            out_target[naper+j+1,i]=icat['aperture_sum_err_'+str(j)]
+        else:
+          out_target[1:,i]=np.nan
+        #
+        # Comparison
+        d = np.sqrt((x-x_c)**2 + (y-y_c)**2)
+        idx = np.argmin(d)
+        dc = d[idx]
+        if d[idx]<2:
+          for j in range(naper):
+            out_compar[j+1,i]=icat['aperture_sum_'+str(j)]
+            out_compar[naper+j+1,i]=icat['aperture_sum_err_'+str(j)]
+        else:
+          out_compar[1:,i]=np.nan
+        #  
+        #  Validation
+        d = np.sqrt((x-x_v)**2+(y-y_v)**2)
+        idx = np.argmin(d)
+        icat = cat[idx]
+        dv = d[idx]
+        if d[idx] < 2:
+          
    def exec(self):
      """ main point with the actual execution of the main steps.
          if preprocessing has to be executed produce the results

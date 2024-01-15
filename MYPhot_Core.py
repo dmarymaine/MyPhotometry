@@ -30,6 +30,8 @@ class MYPhot_Core:
      self.bias = False
      self.filename = {}
      self.showplots = args.showplots
+     self.gain = None
+     self.rdnoise = None
 
    def do_fits_preprocessing(self):
      """ Perform pre-processing aka bias,dark and flat correction
@@ -93,7 +95,74 @@ class MYPhot_Core:
        logger.info("Master Flat already exists - skipping creations")
      else:
        logger.info("Create Master Flat")
-       ffiles = glob.glob() 
+       ffiles = glob.glob(self.workdir+"/FLAT/Flat*fits")
+       ffiles.sort()
+       allflats = []
+
+       masterbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
+       masterdarkflat = fits.getdata(self.workdir+"/Reduced/masterdarkflat.fits")
+
+       for i,ifiles in enumerate(ffiles):
+         logger.info(f"reading flat: {i+1}/{len(ffiles)} - {ifile}")
+         data = fits.getdata(ifile)- masterbias - masterdarkflat
+         mflat = np.median(data)
+         # normalize flat frame
+         data/=mflat
+         logger.info(f"median flat: {mflat}")
+         allflat.append(data)
+       
+       allflat = np.stack(allflat)
+       masterflat=np.median(allflat,axis=0)
+       fits.writeto(self.workdir+"/Reduced/masterflat.fits",masterflat.astype('float32'),overwrite=True)
+      
+     if showplots:
+       tvflats = fits.getdata(self.workdir+"/Reduced/masterflat.fits")
+       plt.figure(figsize=(8,8))
+       plt.imshow(tvflats)
+       plt.colorbar()
+       plt.title("Master Flat from Flat frames")
+       plt.show(block=False)
+
+     # now get the Light frames and calibrate them with bias, dark and flats
+     # also add keywords for auxiliari information
+     # it takes the target (ra,dec) and set it to CRVAL1/CRVAL2
+     # it computes gain and read-out noise from bias and flats
+
+     if os.path.isfile(self.workdir+"/Reduced/light*calib*fits"):
+       logger.info("Light frames already calibrated - skipping light calibration")
+     else:
+       logger.info("Create calibrated Light frames")
+       lfiles = glob.glob(self.workdir+"/LIGHT/light*.fits")
+       lfiles.sort()
+       
+       # compute gain and read-out noise
+       self.gain,self.rdnoise = self._compute_gain_rnoise()
+       
+       ra,dec = self.get_target_radec()
+
+       masterbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
+       masterflat = fits.getdata(self.workdir+"/Reduced/masterflat.fits")
+       masterdark = fits.getdata(self.workdir+"/Reduced/masterdark.fits")
+
+       for i,ifile in enumerate(lfiles):
+         logger.info(f"reducing (debias,dark sub and flat-field) light: {i+1}/{len(lfiles)} - {ifile}")
+         indir, infile = os.path.split(ifile)
+         rootname,_ = os.path.splitext(infile)
+         outfile = os.path.join(self.workdir+f"/Reduced/p_{rootname}.fits")
+         data = fits.getdata(ifile)
+         head = fits.getheader(ifile,output_verifystr = "silentfix")
+
+         # calibre light frames
+         data = (data - masterbias - masterdark)/masterflat
+         head['epoch'] = 2000.0
+         head['CRVAL1'] = ra
+         head['CRVAL2'] = dec
+         head['CRPIX1'] = head['NAXIS1']/2.0
+         head['CRPIX2'] = head['NAXIS2']/2.0
+         head['GAIN'] = (gain,'GAIN in e-/ADU')
+         head['RDNOISE'] = (rdnoise,'read out noise in electron')
+
+         fits.writeto(outfile,data,header=head,overwrite=True)
 
    def convert_cr2_fits(self):
      """ Perform pre-processing aka bias, dark and flat correction
@@ -130,7 +199,7 @@ class MYPhot_Core:
              first,second=it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/bias_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/BIAS/bias_{i+1}.fits',overwrite=True)
 
      logger.info("Create DARK FITS files")
      if os.path.exists(self.workdir+"/DARK"):
@@ -159,7 +228,7 @@ class MYPhot_Core:
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/dark_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/DARK/dark_{i+1}.fits',overwrite=True)
 
      logger.info("Create DARKFLAT FITS files")
      if os.path.exists(self.workdir+"/DARKFLAT"):
@@ -188,7 +257,7 @@ class MYPhot_Core:
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/darkflat_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/DARKFLAT/darkflat_{i+1}.fits',overwrite=True)
 
      logger.info("Create FLAT FITS files")
      if os.path.exists(self.workdir+"/FLAT"):
@@ -217,7 +286,7 @@ class MYPhot_Core:
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/flat_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/FLAT/flat_{i+1}.fits',overwrite=True)
 
      logger.info("Create LIGHT FITS files")
      if os.path.exists(self.workdir+"/LIGHT"):
@@ -248,9 +317,47 @@ class MYPhot_Core:
 
          # add other useful keywords to LIGHT frames
          hdu.header['OBJECT'] = (self.target[0],'Object Name')
-         hdu.writeto(f'{self.workdir}/light_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/LIGHT/light_{i+1}.fits',overwrite=True)
 
+   def _compute_gain_rnoise(self):
+    """
+      Compute Gain and Read-out noise from Bias and Flat frames
+    """
+    biasfile1 = f"{self.workdir}/BIAS/bias_1.fits"
+    biasfile2 = f"{self.workdir}/BIAS/bias_3.fits"
+    flatfile1 = f"{self.workdir}/FLAT/flat_1.fits"
+    flatfile2 = f"{self.workdir}/FLAT/flat_3.fits"
 
+    bias1 = fits.getdata(biasfile1)
+    bias2 = fits.getdata(biasfile2)
+    flat1 = fits.getdata(flatfile1)
+    flat2 = fits.getdata(flatfile2)
+
+    mean_flat1 = np.median(flat1)
+    mean_flat2 = np.median(flat2)
+    mean_bias1 = np.median(bias1)
+    mean_bias2 = np.median(bias2)
+
+    _,_,std_biasdiff = sigma_clipped_stats(bias1-bias2,sigma=4.0,maxiters=2)
+    _,_,std_flatdiff = sigma_clipped_stats(flat1-flat2,sigma=4.0,maxiters=2)
+    gain = ((mean_flat1+mean_flat2) - (mean_bias1+mean_bias2))/((std_flatdiff**2 - std_biasdiff**2))
+    rdnoise = gain *std_biasdiff/np.sqrt(2.)
+
+    logger.info(f"Gain = {gain} - Read-Out Noise = {rdnoise}")
+    return gain, rdnoise
+
+   def get_target_radec(self):
+     """
+       Get target ra and dec from the provided json file
+     """
+     with open(self.target,'r') as f:
+        info = json.load(f)
+
+     ra = info[0][1]
+     dec = info[0][2]
+     
+     return ra,dec
+   
    def exec(self):
      """ main point with the actual execution of the main steps.
          if preprocessing has to be executed produce the results
@@ -265,6 +372,22 @@ class MYPhot_Core:
        self.do_fits_preprocessing()
 
      else:
-       rfiles = glob.glob(args.workdir+"Reduced/light*calib*.fits")
+       rfiles = glob.glob(args.workdir+"Reduced/plight*.fits")
        rfiles.sort()
        self.filename = rfiles
+
+     # do astrometric solution
+     for i,ifile in enumerate(self.filename):
+       logger.info(f"Get astrometric solution {i+1}/{len(self.filename)} - {ifile}")
+       # it uses astap to create astrometric solution
+       rastr, decstr = self._get_target_radec()
+       ra = np.int16(rastr[:2])
+       dec = 90 + np.int16(decstr[:3])
+
+       indir,infile = os.path.split(ifile)
+       rootname,_ = os.path.splitext(infile)
+
+       os.system(f"astap -f {ifile} -ra {ra} -spd {dec} - r 30 -o {self.workdir}/Reduced/test")
+       head_wcs = fits.getheader(f"{self.workdir}/Reduced/test.wcs")
+       data = fits.getdata(ifile)
+       fits.writeto(f"{self.workdir}/Solved/{rootname}_wcs.fits",data,header=head_wcs,overwrite=True)

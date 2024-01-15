@@ -35,6 +35,12 @@ class MYPhot_Core:
      self.out_target = None
      self.out_compar = None
      self.out_valide = None
+     self.x_t = 0.0
+     self.y_t = 0.0
+     self.x_c = 0.0
+     self.y_c = 0.0
+     self.x_v = 0.0
+     self.y_v = 0.0
 
    def do_fits_preprocessing(self):
      """ Perform pre-processing aka bias,dark and flat correction
@@ -442,9 +448,9 @@ class MYPhot_Core:
         logger.info("creating WCS for the selected catalog")
         head = fits.getheader(sciframe+".fits")
         w = WCS(head)
-        x_t,y_t = w.world_to_pixel(t_coord)
-        x_c,y_c = w.world_to_pixel(c_coord)
-        x_v,y_v = w.world_to_pixel(v_coord)
+        self.x_t,self.y_t = w.world_to_pixel(t_coord)
+        self.x_c,self.y_c = w.world_to_pixel(c_coord)
+        self.x_v,self.y_v = w.world_to_pixel(v_coord)
 
         head_cat = fits.getheader(ifile)
         datestr = head['DATE-OBS']
@@ -459,7 +465,7 @@ class MYPhot_Core:
         cat = fits.getdata(ifile)
         x = cat['xcenter']
         y = cat['ycenter']
-        d = np.sqrt((x-x_t)**2 + (y-y_t)**2)
+        d = np.sqrt((x-self.x_t)**2 + (y-self.y_t)**2)
         idx = np.argmin(d)
         icat=cat[idx]
         dt = d[idx]
@@ -471,7 +477,7 @@ class MYPhot_Core:
           out_target[1:,i]=np.nan
         #
         # Comparison
-        d = np.sqrt((x-x_c)**2 + (y-y_c)**2)
+        d = np.sqrt((x-self.x_c)**2 + (y-self.y_c)**2)
         idx = np.argmin(d)
         dc = d[idx]
         if d[idx]<2:
@@ -482,12 +488,17 @@ class MYPhot_Core:
           out_compar[1:,i]=np.nan
         #  
         #  Validation
-        d = np.sqrt((x-x_v)**2+(y-y_v)**2)
+        d = np.sqrt((x-self.x_v)**2+(y-self.y_v)**2)
         idx = np.argmin(d)
         icat = cat[idx]
         dv = d[idx]
         if d[idx] < 2:
-          
+          for j in range(naper):
+            out_valide[j+1,i]=icat['aperture_sum_'+str(j)]
+            out_valide[naper+j+1,i]=icat['aperture_sum_err_'+str(j)]
+        else:
+          out_valide[1:,i] = np.nan
+
    def exec(self):
      """ main point with the actual execution of the main steps.
          if preprocessing has to be executed produce the results

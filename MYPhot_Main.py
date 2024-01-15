@@ -82,6 +82,18 @@ myphot.compute_allobject_photometry()
 myphot.get_target_comp_valid_photometry()
 
 # now plot radial profile to check which aperture is optimal
+myphot.show_radial_profiles()
+
+# user can specify the radius for proper photometry
+with open(aperture_json,'r') as f:
+   radii = json.load(f)
+
+logger.info(f"You can select radius among {radii}")   
+radius_str = input("Enter the radius value: ")
+
+radius = int(radius_str)
+idx = np.argmin(radii - radius)
+logger.info(f"Optimal selected radius is {radius} pixels #{idx+1} in the list")
 
 
 

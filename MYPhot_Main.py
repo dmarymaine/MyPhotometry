@@ -12,6 +12,7 @@
 
 import argparse
 import json
+import numpy as np
 
 import MYPhot_Logging as log
 from MYPhot_Core import MYPhot_Core
@@ -81,21 +82,26 @@ myphot.compute_allobject_photometry()
 # validation stars. 
 myphot.get_target_comp_valid_photometry()
 
+# now create a plot of one image with apertures
+myphot.show_apertures()
+
 # now plot radial profile to check which aperture is optimal
-myphot.show_radial_profiles()
+#myphot.show_radial_profiles()
 
 # user can specify the radius for proper photometry
-with open(aperture_json,'r') as f:
+with open(apertures_json,'r') as f:
    radii = json.load(f)
 
 logger.info(f"You can select radius among {radii}")   
 radius_str = input("Enter the radius value: ")
 
 radius = int(radius_str)
-idx = np.argmin(radii - radius)
+
+idx = radii.index(radius)
 logger.info(f"Optimal selected radius is {radius} pixels #{idx+1} in the list")
 
-
+logger.info("Plotting light curve")
+myphot.plot_light_curve(idx)
 
 logger.info("Done")
 

@@ -74,14 +74,14 @@ class MYPhot_Core:
        allbias = np.stack(allbias)
        superbias = np.median(allbias,axis=0)
        fits.writeto(self.workdir+"/Reduced/masterbias.fits",superbias.astype('float32'),overwrite=True)
-     logger.info(f"showplots value is {self.showplots}")  
+
      if self.showplots:
        tvbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
        plt.figure(figsize=(8,8))
        plt.imshow(tvbias,origin='lower')
        plt.colorbar()
        plt.title("Master Bias derived from bias frames")
-       plt.show(block=False)
+       plt.show(block=True)
        
      # check if flat dark is present in the Reduce folder 
      if os.path.isfile(self.workdir+"/Reduced/masterdarkflat.fits"):
@@ -107,7 +107,7 @@ class MYPhot_Core:
        plt.imshow(tvdflats,origin='lower')
        plt.colorbar()
        plt.title("Master Dark-Flat from dark-flat frames")
-       plt.show()
+       plt.show(block=True)
      
      # now combinte the flats: subtract BIAS and DARKFLAT
      # normalize the frames and create the master flat
@@ -141,7 +141,7 @@ class MYPhot_Core:
        plt.imshow(tvflats)
        plt.colorbar()
        plt.title("Master Flat from Flat frames")
-       plt.show()
+       plt.show(block=True)
      
      # now combine the dark frames to create the master dark
      if os.path.isfile(self.workdir+"/Reduced/masterdark.fits"):
@@ -169,14 +169,14 @@ class MYPhot_Core:
        plt.imshow(tvdark)
        plt.colorbar()
        plt.title("Master Dark from Dark frames")
-       plt.show()
+       plt.show(block=True)
 
      # now get the Light frames and calibrate them with bias, dark and flats
      # also add keywords for auxiliari information
      # it takes the target (ra,dec) and set it to CRVAL1/CRVAL2
      # it computes gain and read-out noise from bias and flats
 
-     if os.path.isfile(self.workdir+"/Reduced/plight*fits"):
+     if os.path.isfile(self.workdir+"/Reduced/p_light*fits"):
        logger.info("Light frames already calibrated - skipping light calibration")
      else:
        logger.info("Create calibrated Light frames")
@@ -434,44 +434,49 @@ class MYPhot_Core:
       - get photometry for all objects 
       - save results to a catalog
     """
-    logger.info("Computing Aperture Photometry for all the objects")
-    cfiles = glob.glob(f"{self.workdir}/Solved/*wcs.fits")
-    cfiles.sort()
-
     with open(self.apertures,'r') as f:
       aper_radii = json.load(f)
 
     self.naper = len(aper_radii)
-    for i,ifile in enumerate(cfiles):
-      logger.info(f"aperture photometry for {i+1}/{len(cfiles)} - {ifile}")
-      rootname,_ = os.path.splitext(ifile)
-      catfile = rootname+'-cat.fits'
-      data = fits.getdata(ifile)
 
-      # mask to get background estimation
-      sigma_clip = SigmaClip(sigma=3.)
-      mask = pht.make_source_mask(data,nsigma=3,npixels=5,dilate_size=11)
-      bkg_estimator = pht.SExtractorBackground()
-      bkg = pht.Background2D(data,(64,64),mask=mask,filter_size=(3,3),sigma_clip=sigma_clip,
-            bkg_estimator=bkg_estimator)
+    checkfiles = glob.glob(f"{self.workdir}/Solved/*-cat.fits")
+    if len(checkfiles) > 0:
+      logger.info("Photometry already computed  - skipping catalog creation")
+    else:
+      logger.info("Computing Aperture Photometry for all the objects")
+      cfiles = glob.glob(f"{self.workdir}/Solved/*wcs.fits")
+      cfiles.sort()
 
-      if (self.showplots and i == 1):
-        f,axs = plt.subplots(1,2,figsize=(16,8))
-        axs[0].imshow(bkg.background,origin='lower')
-        axs[0].set_title("background")
-        axs[1].imshow(bkg.background_rms,origin='lower')
-        axs[1].set_title("background rms")
-        plt.show(block=True)
+      for i,ifile in enumerate(cfiles):
+        logger.info(f"aperture photometry for {i+1}/{len(cfiles)} - {ifile}")
+        rootname,_ = os.path.splitext(ifile)
+        catfile = rootname+'-cat.fits'
+        data = fits.getdata(ifile)
 
-      daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
-                sharplo=0.5,sharphi=2.0,roundlo=0.0,roundhi=0.7)
-      sources = daofind(data - bkg.background)
-      positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
-      apert = [pht.CircularAperture(positions,r=r) for r in aper_radii]
-      error = calc_total_error(data-bkg.background,bkg.background_rms,self.gain)
-      aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
+        # mask to get background estimation
+        sigma_clip = SigmaClip(sigma=3.)
+        mask = pht.make_source_mask(data,nsigma=3,npixels=5,dilate_size=11)
+        bkg_estimator = pht.SExtractorBackground()
+        bkg = pht.Background2D(data,(64,64),mask=mask,filter_size=(3,3),sigma_clip=sigma_clip,
+              bkg_estimator=bkg_estimator)
+
+        if (self.showplots and i == 1):
+          f,axs = plt.subplots(1,2,figsize=(16,8))
+          axs[0].imshow(bkg.background,origin='lower')
+          axs[0].set_title("background")
+          axs[1].imshow(bkg.background_rms,origin='lower')
+          axs[1].set_title("background rms")
+          plt.show(block=True)
+
+        daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
+                  sharplo=0.5,sharphi=2.0,roundlo=0.0,roundhi=0.7)
+        sources = daofind(data - bkg.background)
+        positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
+        apert = [pht.CircularAperture(positions,r=r) for r in aper_radii]
+        error = calc_total_error(data-bkg.background,bkg.background_rms,self.gain)
+        aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
       
-      aper_phot.write(catfile,overwrite=True)
+        aper_phot.write(catfile,overwrite=True)
 
    def get_target_comp_valid_photometry(self):
      """
@@ -497,6 +502,11 @@ class MYPhot_Core:
      c_coord = SkyCoord([f"{info[1][1]} {info[1][2]}"],frame='icrs',unit=(u.hourangle,u.deg))
      v_coord = SkyCoord([f"{info[2][1]} {info[2][2]}"],frame='icrs',unit=(u.hourangle,u.deg))
 
+     logger.info("Selected objects with coordinates:")
+     logger.info(f"Target {target_name} = {t_coord}")
+     logger.info(f"Comparison {compar_name} = {c_coord}")
+     logger.info(f"Validation {valide_name} = {v_coord}")
+
      with open(self.apertures,'r') as g:
        aper_radii = json.load(g)
 
@@ -512,12 +522,12 @@ class MYPhot_Core:
         rootname,_ = os.path.splitext(ifile)
         #remove the last 4 spaces from file name to get the calibrated frame
         sciframe = rootname[:-4]
+
         # read sci header, create WCS and get (x,y) for T,C and V stars
         logger.info("creating WCS for the selected catalog")
         head = fits.getheader(sciframe+".fits")
         w = WCS(head)
         x,y = w.world_to_pixel(t_coord)
-        print (x,y)
         self.x_t.append(x)
         self.y_t.append(y)
         x,y = w.world_to_pixel(c_coord)
@@ -540,12 +550,11 @@ class MYPhot_Core:
         cat = fits.getdata(ifile)
         x = cat['xcenter']
         y = cat['ycenter']
-        d = np.sqrt((x-self.x_t[i])**2 + (y-self.y_t[i])**2)
-        idx = np.argmin(d)
-        print (f'target idx = {idx} for cat # {i+1} = {d[idx]}')
+        d_t = np.sqrt((x-self.x_t[i])**2 + (y-self.y_t[i])**2)
+        idx = np.argmin(d_t)
         icat=cat[idx]
-        dt = d[idx]
-        if d[idx]<7:
+        dt = d_t[idx]
+        if d_t[idx]<2:
           for j in range(naper):
             self.out_target[j+1,i]=icat['aperture_sum_'+str(j)]
             self.out_target[naper+j+1,i]=icat['aperture_sum_err_'+str(j)]
@@ -553,12 +562,11 @@ class MYPhot_Core:
           self.out_target[1:,i]=np.nan
         #
         # Comparison
-        d = np.sqrt((x-self.x_c[i])**2 + (y-self.y_c[i])**2)
-        idx = np.argmin(d)
-        dc = d[idx]
-        print (f'comparison idx = {idx} for cat # {i+1} = {d[idx]}')
-
-        if d[idx]<7:
+        d_c = np.sqrt((x-self.x_c[i])**2 + (y-self.y_c[i])**2)
+        idx = np.argmin(d_c)
+        icat=cat[idx]
+        dc = d_c[idx]
+        if d_c[idx]<2:
           for j in range(naper):
             self.out_compar[j+1,i]=icat['aperture_sum_'+str(j)]
             self.out_compar[naper+j+1,i]=icat['aperture_sum_err_'+str(j)]
@@ -566,18 +574,18 @@ class MYPhot_Core:
           self.out_compar[1:,i]=np.nan
         #  
         #  Validation
-        d = np.sqrt((x-self.x_v[i])**2+(y-self.y_v[i])**2)
-        idx = np.argmin(d)
-        print (f'validation idx = {idx} for cat # {i+1} = {d[idx]}')
+        d_v = np.sqrt((x-self.x_v[i])**2+(y-self.y_v[i])**2)
+        idx = np.argmin(d_v)
         icat = cat[idx]
-        dv = d[idx]
-        if d[idx] < 7:
+        dv = d_v[idx]
+        if d_v[idx] < 2:
           for j in range(naper):
             self.out_valide[j+1,i]=icat['aperture_sum_'+str(j)]
             self.out_valide[naper+j+1,i]=icat['aperture_sum_err_'+str(j)]
         else:
           self.out_valide[1:,i] = np.nan
-        print (self.out_target[3,i],self.out_compar[3,i],self.out_valide[3,i])
+
+
    def show_apertures(self):
      """
       Show one image with apertures on the target, comparison and
@@ -594,12 +602,12 @@ class MYPhot_Core:
      aper_comp = pht.CircularAperture(pos_com,r=10)
      aper_chec = pht.CircularAperture(pos_che,r=10)
      plt.figure(figsize=(8,8))
-     plt.imshow(data,cmap='Greys_r',origin='lower',vmin=160,vmax=200,interpolation='nearest')
+     plt.imshow(data,cmap='Greys_r',origin='lower',vmin=160,vmax=250,interpolation='nearest')
      aper_targ.plot(color='red',lw=2,alpha=0.5)
      aper_comp.plot(color='cyan',lw=2,alpha=0.5)
      aper_chec.plot(color='yellow',lw=2,alpha=0.5)
      plt.title('red:target, cyan: comparison, yellow: validation')
-     plt.show()
+     plt.show(block=False)
 
    def show_radial_profiles(self):
      """
@@ -620,10 +628,10 @@ class MYPhot_Core:
      plt.plot(rp_t.radius,rp_t.profile/np.max(rp_t.profile),label='Target')
      plt.plot(rp_c.radius,rp_c.profile/np.max(rp_c.profile),label='Comparison')
      plt.plot(rp_v.radius,rp_v.profile/np.max(rp_v.profile),label='Validation')
-     plt.xlim([0,30])
-     plt.xlabel('Radius [pixels]')
-     plt.ylim([0,1])
-     plt.ylabel('Normalize Radial Profile')
+     plt.xlim([0,25])
+     plt.xlabel('Radius [pixels]',fontsize=20)
+     plt.ylim([0,1.2])
+     plt.ylabel('Normalize Radial Profile',fontsize=20)
      plt.show(block=False)
 
    def plot_light_curve(self,iaper):
@@ -651,9 +659,9 @@ class MYPhot_Core:
     norm_vali = np.median(rlc_vali)
     plt.figure(figsize=(16,8))
     plt.plot(self.out_target[0,:],rlc_targ/norm_targ,'r.')
-    plt.plot(self.out_target[0,:],rlc_vali/norm_vali,'b.')
+    plt.plot(self.out_target[0,:],rlc_vali/norm_vali-0.08,'b.')
     plt.xlabel('MJD',fontsize=20)
-    plt.ylabel('Relative $m$')
+    plt.ylabel('Relative $m$',fontsize=20)
     plt.show(block=True)
 
    def exec(self):
@@ -693,28 +701,11 @@ class MYPhot_Core:
          indir,infile = os.path.split(ifile)
          rootname,_ = os.path.splitext(infile)
 
-         os.system(f"astap -f {ifile} -ra {ra} -spd {dec} - r 30 -fov 1.48 -o {self.workdir}/Reduced/test")
-         data = fits.getdata(ifile)
-         head_data = fits.getheader(ifile)
-         head_wcs = fits.Header.fromtextfile(f"{self.workdir}/Reduced/test.wcs")
-         head_data['CRVAL1'] = head_wcs['CRVAL1']
-         head_data['CRVAL2'] = head_wcs['CRVAL2']
-         head_data['CRPIX1'] = head_wcs['CRPIX1']
-         head_data['CRPIX2'] = head_wcs['CRPIX2']
-         head_data['CTYPE1'] = head_wcs['CTYPE1']
-         head_data['CTYPE2'] = head_wcs['CTYPE2']
-         head_data['CDELT1'] = head_wcs['CDELT1']
-         head_data['CDELT2'] = head_wcs['CDELT2']
-         head_data['CROTA1'] = head_wcs['CROTA1']
-         head_data['CROTA2'] = head_wcs['CROTA2']
-         head_data['CD1_1'] = head_wcs['CD1_1']
-         head_data['CD1_2'] = head_wcs['CD2_1']
-         head_data['CD2_1'] = head_wcs['CD2_1']
-         head_data['CD2_2'] = head_wcs['CD2_2']
-
          if os.path.exists(f"{self.workdir}/Solved"):
           logger.info("Solved folder already exists - skipping creation")
          else:
           os.system(f"mkdir {self.workdir}/Solved")
 
-         fits.writeto(f"{self.workdir}/Solved/{rootname}_wcs.fits",data,header=head_data,overwrite=True)
+         #os.system(f"astap -f {ifile} -ra {ra} -spd {dec} - r 30 -fov 1.48 -o {self.workdir}/Reduced/test")
+         os.system(f"solve-field --scale-units arcsecperpix --scale-low 3. --scale-high 3.5 {ifile} -D {self.workdir}/Solved --no-plots")
+         os.system(f"mv {self.workdir}/Solved/{rootname}.new {self.workdir}/Solved/{rootname}_wcs.fits")

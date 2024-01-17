@@ -86,7 +86,7 @@ myphot.get_target_comp_valid_photometry()
 myphot.show_apertures()
 
 # now plot radial profile to check which aperture is optimal
-#myphot.show_radial_profiles()
+myphot.show_radial_profiles()
 
 # user can specify the radius for proper photometry
 with open(apertures_json,'r') as f:

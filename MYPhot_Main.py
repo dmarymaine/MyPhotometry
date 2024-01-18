@@ -100,6 +100,14 @@ radius = int(radius_str)
 idx = radii.index(radius)
 logger.info(f"Optimal selected radius is {radius} pixels #{idx+1} in the list")
 
+inner_str = input("Enter inner anulus radius:")
+outer_str = input("Enter output anulus radius:")
+idx_in = radii.index(int(inner_str))
+idx_out = radii.index(int(outer_str))
+
+logger.info("Computing magnitudes")
+myphot.calculate_mag(idx,idx_in,idx_out)
+
 logger.info("Plotting light curve")
 myphot.plot_light_curve(idx)
 

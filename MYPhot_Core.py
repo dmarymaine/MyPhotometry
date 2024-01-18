@@ -634,11 +634,40 @@ class MYPhot_Core:
      plt.ylabel('Normalize Radial Profile',fontsize=20)
      plt.show(block=False)
 
+   def calculate_mag(self,iaper,inner,outer):
+     """
+     Function to calculate instrumental magnitudes
+     for target, comparisons and validation stars
+     """
+     with open(self.target,'r') as f:
+      info = json.load(f)
+     
+     magc_cat = info[1][3]
+     anulus_t = self.out_target[outer+1,:] - self.out_target[inner+1,:]
+     anulus_c = self.out_compar[outer+1,:] - self.out_compar[inner+1,:]
+     anulus_v = self.out_valide[outer+1,:] - self.out_valide[inner+1,:]
+
+     t_insmag = -2.5*np.log10(self.out_target[iaper+1,:]- anulus_t)
+     c_insmag = -2.5*np.log10(self.out_compar[iaper+1,:]- anulus_c)
+     v_insmag = -2.5*np.log10(self.out_valide[iaper+1,:]- anulus_v)
+
+     t_mag = t_insmag -c_insmag + magc_cat
+     v_mag = v_insmag -c_insmag + magc_cat     
+   
+     t_mag_ave = np.median(t_mag)
+     v_mag_ave = np.median(v_mag)
+     t_mag_std = 1.253*np.std(t_mag)/np.sqrt(len(t_mag))
+     v_mag_std = 1.253*np.std(v_mag)/np.sqrt(len(v_mag))
+
+     logger.info("Derived Magnitudes")
+     logger.info(f"Target - {info[0][0]}: {t_mag_ave}+/-{t_mag_std}")
+     logger.info(f"Validation - {info[2][0]}: {v_mag_ave}+/-{v_mag_std}")
+
+
    def plot_light_curve(self,iaper):
     """
      Plot the light curves of target, comparison and validation
     """
-    print (self.out_target[iaper+1,:],self.out_compar[iaper+1,:])
     rlc_targ = self.out_target[iaper+1,:]/self.out_compar[iaper+1,:]
     rlc_vali = self.out_valide[iaper+1,:]/self.out_compar[iaper+1,:]
 

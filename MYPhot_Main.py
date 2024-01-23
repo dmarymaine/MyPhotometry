@@ -43,6 +43,13 @@ parser.add_argument('--apertures',type=str,required=True,
 
 parser.add_argument('--showplots',dest='showplots',action='store_true',
                     help='wheter produce plots during processing')
+
+parser.add_argument('--plot_light_curve',dest='plot_light_curve',action='store_true',
+                    help='whether plot light curve (useful for planet transits)')
+
+parser.add_argument('--maglim',dest='maglim',required=True,
+                    help='magnitude limit for the AAVSO chart for selecting field stars')
+
 # output report
 parser.add_argument('--aavso',dest='aavso',action='store_true',
                     help='whether produce an aavso output file')
@@ -76,7 +83,9 @@ myphot = MYPhot_Core(args)
 myphot.exec()
 
 # compute photometry for all objects (creating catalogs)
-myphot.compute_allobject_photometry()
+filters = ['V','B']
+for filter in filters:
+  myphot.compute_allobject_photometry(filter)
 
 # now create circular apertures around the target, comparison and 
 # validation stars. 
@@ -108,8 +117,9 @@ idx_out = radii.index(int(outer_str))
 logger.info("Computing magnitudes")
 myphot.calculate_mag(idx,idx_in,idx_out)
 
-logger.info("Plotting light curve")
-myphot.plot_light_curve(idx)
+if (args.plot_light_curve):
+  logger.info("Plotting light curve")
+  myphot.plot_light_curve(idx)
 
 logger.info("Done")
 

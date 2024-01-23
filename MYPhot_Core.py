@@ -50,172 +50,204 @@ class MYPhot_Core:
      self.y_c = []
      self.x_v = []
      self.y_v = []
+     self.filters = ['V','B']
+     self.maglim = None
+     self.correct_bv
+
+   def _get_green(self,data):
+     """
+     Extract the green channel from FITS image
+     """
+     h,w = data.shape 
+     oh = 0.5*h 
+     ow = 0.5*w 
+  
+     g1 = data[0::2,1::2]
+     g2 = data[1::2,0::2]
+     green = 0.5*(g1[:oh,:ow]+g2[:oh,:ow])
+
+     return green
+
+   def _get_blue(self,data):
+     """
+     Extract the blue channel from FITS image
+     """  
+     h,w = data.shape 
+     oh = 0.5*h 
+     ow = 0.5*w 
+     b1 = data[1::2,1::2]
+     blue = b1[:oh,:ow]
+
+     return blue 
 
 
    def do_fits_preprocessing(self):
      """ Perform pre-processing aka bias,dark and flat correction
          of input data in FITS format """
+     
+     for filter in self.filters:
+       # check if a master bias is already present in the Reduce folder     
+       if os.path.isfile(f"{self.workdir}/Reduced/masterbias_{filter}.fits"):
+         logger.info(f"Master Bias for filter {filter} already present - skipping master bias creation")
+       else:
+         os.system(f"mkdir {self.workdir}/Reduced")
+         logger.info(f"Create Master Bias for filter {filter}")
+         bfiles = glob.glob(f"{self.workdir}/BIAS/bias_{filter}_*.fits")
+         bfiles.sort()
+         allbias = []
+         for i,ifile in enumerate(bfiles):
+          logger.info(f"reading bias: {i+1}/{len(bfiles)} - {ifile}")
+          data = fits.getdata(ifile)
+          allbias.append(data)
 
-     # check if a master bias is already present in the Reduce folder     
-     if os.path.isfile(self.workdir+"/Reduced/masterbias.fits"):
-       logger.info("Master Bias already present - skipping master bias creation")
-     else:
-       os.system(f"mkdir {self.workdir}/Reduced")
-       logger.info("Create Master Bias")
-       bfiles = glob.glob(self.workdir+"/BIAS/bias*.fits")
-       bfiles.sort()
-       allbias = []
-       for i,ifile in enumerate(bfiles):
-         logger.info(f"reading bias: {i+1}/{len(bfiles)} - {ifile}")
-         data = fits.getdata(ifile)
-         allbias.append(data)
+         # stack bias together
+         allbias = np.stack(allbias)
+         superbias = np.median(allbias,axis=0)
+         fits.writeto(f"{self.workdir}/Reduced/masterbias_{filter}.fits",superbias.astype('float32'),overwrite=True)
 
-       # stack bias together
-       allbias = np.stack(allbias)
-       superbias = np.median(allbias,axis=0)
-       fits.writeto(self.workdir+"/Reduced/masterbias.fits",superbias.astype('float32'),overwrite=True)
-
-     if self.showplots:
-       tvbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
-       plt.figure(figsize=(8,8))
-       plt.imshow(tvbias,origin='lower')
-       plt.colorbar()
-       plt.title("Master Bias derived from bias frames")
-       plt.show(block=True)
+         if self.showplots:
+           tvbias = fits.getdata(f"{self.workdir}/Reduced/masterbias_{filter}.fits")
+           plt.figure(figsize=(8,8))
+           plt.imshow(tvbias,origin='lower')
+           plt.colorbar()
+           plt.title(f"Master Bias derived from bias frames for filter {filter}")
+           plt.show(block=True)
        
-     # check if flat dark is present in the Reduce folder 
-     if os.path.isfile(self.workdir+"/Reduced/masterdarkflat.fits"):
-       logger.info("Master Dark Flat already present - skipping creation")
-     else:
-       logger.info("Create Master Dark Flat")
-       dffiles = glob.glob(self.workdir+"/DARKFLAT/darkflat*.fits")
-       dffiles.sort()
-       alldarkflats = []
-       for i,ifile in enumerate(dffiles):
-         logger.info(f"reading dark-flat: {i+1}/{len(dffiles)} - {ifile}")
-         data = fits.getdata(ifile)
-         alldarkflats.append(data)
+       # check if flat dark is present in the Reduce folder 
+       if os.path.isfile(f"{self.workdir}/Reduced/masterdarkflat_{filter}.fits"):
+         logger.info("Master Dark Flat already present - skipping creation")
+       else:
+         logger.info(f"Create Master Dark Flat for filter {filter}")
+         dffiles = glob.glob(f"{self.workdir}/DARKFLAT/darkflat_{filter}_*.fits")
+         dffiles.sort()
+         alldarkflats = []
+         for i,ifile in enumerate(dffiles):
+           logger.info(f"reading dark-flat: {i+1}/{len(dffiles)} - {ifile}")
+           data = fits.getdata(ifile)
+           alldarkflats.append(data)
 
-       # stack all dark flats together
-       alldarkflats = np.stack(alldarkflats)
-       mdarkflat = np.median(alldarkflats,axis=0)
-       fits.writeto(self.workdir+"/Reduced/masterdarkflat.fits",mdarkflat.astype('float32'),overwrite=True)
+         # stack all dark flats together
+         alldarkflats = np.stack(alldarkflats)
+         mdarkflat = np.median(alldarkflats,axis=0)
+         fits.writeto(f"{self.workdir}/Reduced/masterdarkflat_{filter}.fits",mdarkflat.astype('float32'),overwrite=True)
            
-     if self.showplots:
-       tvdflats = fits.getdata(self.workdir+"/Reduced/masterdarkflat.fits")
-       plt.figure(figsize=(8,8))
-       plt.imshow(tvdflats,origin='lower')
-       plt.colorbar()
-       plt.title("Master Dark-Flat from dark-flat frames")
-       plt.show(block=True)
+         if self.showplots:
+          tvdflats = fits.getdata(f"{self.workdir}/Reduced/masterdarkflat_{filter}.fits")
+          plt.figure(figsize=(8,8))
+          plt.imshow(tvdflats,origin='lower')
+          plt.colorbar()
+          plt.title(f"Master Dark-Flat from dark-flat frames for filter {filter}")
+          plt.show(block=True)
      
-     # now combinte the flats: subtract BIAS and DARKFLAT
-     # normalize the frames and create the master flat
-     if os.path.isfile(self.workdir+"/Reduced/masterflat.fits"):
-       logger.info("Master Flat already exists - skipping creations")
-     else:
-       logger.info("Create Master Flat")
-       ffiles = glob.glob(self.workdir+"/FLAT/flat*fits")
-       ffiles.sort()
-       allflats = []
+       # now combinte the flats: subtract BIAS and DARKFLAT
+       # normalize the frames and create the master flat
+       if os.path.isfile(f"{self.workdir}/Reduced/masterflat_{filter}.fits"):
+         logger.info("Master Flat already exists - skipping creations")
+       else:
+         logger.info(f"Create Master Flat for filter {filter}")
+         ffiles = glob.glob(f"{self.workdir}/FLAT/flat_{filter}_*fits")
+         ffiles.sort()
+         allflats = []
 
-       masterbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
-       masterdarkflat = fits.getdata(self.workdir+"/Reduced/masterdarkflat.fits")
+         masterbias = fits.getdata(f"{self.workdir}/Reduced/masterbias_{filter}.fits")
+         masterdarkflat = fits.getdata(f"{self.workdir}/Reduced/masterdarkflat_{filter}.fits")
 
-       for i,ifile in enumerate(ffiles):
-         logger.info(f"reading flat: {i+1}/{len(ffiles)} - {ifile}")
-         data = fits.getdata(ifile)- masterbias - masterdarkflat
-         mflat = np.median(data)
-         # normalize flat frame
-         data/=mflat
-         logger.info(f"median flat: {mflat}")
-         allflats.append(data)
+         for i,ifile in enumerate(ffiles):
+           logger.info(f"reading flat: {i+1}/{len(ffiles)} - {ifile}")
+           data = fits.getdata(ifile)- masterbias - masterdarkflat
+
+           mflat = np.median(data)
+           # normalize flat frame
+           data/=mflat
+           logger.info(f"median flat: {mflat}")
+           allflats.append(data)
        
-       allflats = np.stack(allflats)
-       masterflat=np.median(allflats,axis=0)
-       fits.writeto(self.workdir+"/Reduced/masterflat.fits",masterflat.astype('float32'),overwrite=True)
+         allflats = np.stack(allflats)
+         masterflat=np.median(allflats,axis=0)
+         fits.writeto(f"{self.workdir}/Reduced/masterflat_{filter}.fits",masterflat.astype('float32'),overwrite=True)
       
-     if self.showplots:
-       tvflats = fits.getdata(self.workdir+"/Reduced/masterflat.fits")
-       plt.figure(figsize=(8,8))
-       plt.imshow(tvflats)
-       plt.colorbar()
-       plt.title("Master Flat from Flat frames")
-       plt.show(block=True)
+         if self.showplots:
+          tvflats = fits.getdata(f"{self.workdir}/Reduced/masterflat_{filter}.fits")
+          plt.figure(figsize=(8,8))
+          plt.imshow(tvflats)
+          plt.colorbar()
+          plt.title(f"Master Flat from Flat frames for filter {filter}")
+          plt.show(block=True)
      
-     # now combine the dark frames to create the master dark
-     if os.path.isfile(self.workdir+"/Reduced/masterdark.fits"):
-       logger.info("Master Dark already present - skipping creation")
-     else:
-       logger.info("Creating Master Dark")
-       dfiles = glob.glob(self.workdir+"/DARK/dark*.fits")
-       dfiles.sort()
-       alldarks = []
+       # now combine the dark frames to create the master dark
+       if os.path.isfile(f"{self.workdir}/Reduced/masterdark_{filter}.fits"):
+         logger.info("Master Dark already present - skipping creation")
+       else:
+         logger.info(f"Creating Master Dark for filter {filter}")
+         dfiles = glob.glob(f"{self.workdir}/DARK/dark_{filter}_*.fits")
+         dfiles.sort()
+         alldarks = []
 
-       masterbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
+         masterbias = fits.getdata(f"{self.workdir}/Reduced/masterbias_{filter}.fits")
 
-       for i,ifile in enumerate(dfiles):
-         logger.info(f"reading dark: {i+1}/{len(dfiles)} - {ifile}")
-         data = fits.getdata(ifile) - masterbias
-         alldarks.append(data)
+         for i,ifile in enumerate(dfiles):
+           logger.info(f"reading dark: {i+1}/{len(dfiles)} - {ifile}")
+           data = fits.getdata(ifile) - masterbias
+           alldarks.append(data)
        
-       alldarks = np.stack(alldarks)
-       masterdark = np.median(alldarks,axis=0)
-       fits.writeto(self.workdir+"/Reduced/masterdark.fits",masterdark.astype('float32'),overwrite=True)
+         alldarks = np.stack(alldarks)
+         masterdark = np.median(alldarks,axis=0)
+         fits.writeto(f"{self.workdir}/Reduced/masterdark_{filter}.fits",masterdark.astype('float32'),overwrite=True)
 
-     if self.showplots:
-       tvdark = fits.getdata(self.workdir+'/Reduced/masterdark.fits')
-       plt.figure(figsize=(8,8))
-       plt.imshow(tvdark)
-       plt.colorbar()
-       plt.title("Master Dark from Dark frames")
-       plt.show(block=True)
+         if self.showplots:
+          tvdark = fits.getdata(f"{self.workdir}/Reduced/masterdark_{filter}.fits")
+          plt.figure(figsize=(8,8))
+          plt.imshow(tvdark)
+          plt.colorbar()
+          plt.title(f"Master Dark from Dark frames for filter {filter}")
+          plt.show(block=True)
 
-     # now get the Light frames and calibrate them with bias, dark and flats
-     # also add keywords for auxiliari information
-     # it takes the target (ra,dec) and set it to CRVAL1/CRVAL2
-     # it computes gain and read-out noise from bias and flats
+       # now get the Light frames and calibrate them with bias, dark and flats
+       # also add keywords for auxiliari information
+       # it takes the target (ra,dec) and set it to CRVAL1/CRVAL2
+       # it computes gain and read-out noise from bias and flats
 
-     if os.path.isfile(self.workdir+"/Reduced/p_light*fits"):
-       logger.info("Light frames already calibrated - skipping light calibration")
-     else:
-       logger.info("Create calibrated Light frames")
-       lfiles = glob.glob(self.workdir+"/LIGHT/light*.fits")
-       lfiles.sort()
+       if os.path.isfile(f"{self.workdir}/Reduced/p_light_{filter}_*fits"):
+         logger.info("Light frames already calibrated - skipping light calibration")
+       else:
+         logger.info(f"Create calibrated Light frames for filter {filter}")
+         lfiles = glob.glob(f"{self.workdir}/LIGHT/light_{filter}_*.fits")
+         lfiles.sort()
        
-       # compute gain and read-out noise
-       self.gain,self.rdnoise = self._compute_gain_rnoise()
+         # compute gain and read-out noise
+         self.gain,self.rdnoise = self._compute_gain_rnoise(filter)
        
-       ra,dec = self.get_target_radec()
+         ra,dec = self.get_target_radec()
 
-       masterbias = fits.getdata(self.workdir+"/Reduced/masterbias.fits")
-       masterflat = fits.getdata(self.workdir+"/Reduced/masterflat.fits")
-       masterdark = fits.getdata(self.workdir+"/Reduced/masterdark.fits")
+         masterbias = fits.getdata(f"{self.workdir}/Reduced/masterbias_{filter}.fits")
+         masterflat = fits.getdata(f"{self.workdir}/Reduced/masterflat_{filter}.fits")
+         masterdark = fits.getdata(f"{self.workdir}/Reduced/masterdark_{filter}.fits")
 
-       for i,ifile in enumerate(lfiles):
-         logger.info(f"reducing (debias,dark sub and flat-field) light: {i+1}/{len(lfiles)} - {ifile}")
-         indir, infile = os.path.split(ifile)
-         rootname,_ = os.path.splitext(infile)
-         outfile = os.path.join(self.workdir+f"/Reduced/p_{rootname}.fits")
-         data = fits.getdata(ifile)
-         head = fits.getheader(ifile,output_verifystr = "silentfix")
+         for i,ifile in enumerate(lfiles):
+           logger.info(f"reducing (debias,dark sub and flat-field) light: {i+1}/{len(lfiles)} - {ifile}")
+           indir, infile = os.path.split(ifile)
+           rootname,_ = os.path.splitext(infile)
+           outfile = os.path.join(f"{self.workdir}/Reduced/p_{rootname}.fits")
+           data = fits.getdata(ifile)
+           head = fits.getheader(ifile,output_verifystr = "silentfix")
 
-         # calibre light frames
-         calib_data = (data[100:-100,100:-100] - masterbias[100:-100,100:-100] - masterdark[100:-100,100:-100])/masterflat[100:-100,100:-100]
-         naxis1 = head['NAXIS1']-200
-         naxis2 = head['NAXIS2']-200
-         head['epoch'] = 2000.0
-         head['NAXIS1'] = naxis1
-         head['NAXIS2'] = naxis2
-         head['CRVAL1'] = ra
-         head['CRVAL2'] = dec
-         head['CRPIX1'] = head['NAXIS1']/2
-         head['CRPIX2'] = head['NAXIS2']/2
-         head['GAIN'] = (self.gain,'GAIN in e-/ADU')
-         head['RDNOISE'] = (self.rdnoise,'read out noise in electron')
+           # calibre light frames
+           calib_data = (data[100:-100,100:-100] - masterbias[100:-100,100:-100] - masterdark[100:-100,100:-100])/masterflat[100:-100,100:-100]
+           naxis1 = head['NAXIS1']-200
+           naxis2 = head['NAXIS2']-200
+           head['epoch'] = 2000.0
+           head['NAXIS1'] = naxis1
+           head['NAXIS2'] = naxis2
+           head['CRVAL1'] = ra
+           head['CRVAL2'] = dec
+           head['CRPIX1'] = head['NAXIS1']/2
+           head['CRPIX2'] = head['NAXIS2']/2
+           head['FILTER'] = (filter,'Colour used from OSC bayer matrix')
+           head['GAIN'] = (self.gain,'GAIN in e-/ADU')
+           head['RDNOISE'] = (self.rdnoise,'read out noise in electron')
 
-         fits.writeto(outfile,calib_data.astype('float32'),header=head,overwrite=True)
-         self.filename.append(outfile)
+           fits.writeto(outfile,calib_data.astype('float32'),header=head,overwrite=True)
+           self.filename.append(outfile)
 
    def convert_cr2_fits(self):
      """ Perform pre-processing aka bias, dark and flat correction
@@ -223,7 +255,7 @@ class MYPhot_Core:
 
      # transform CR2 files into FITS files and then proceed with
      # do_fits_preprocessing
-     logger.info("Create BIAS FITS files")
+     logger.info("Create BIAS FITS files for Green channel")
      if os.path.exists(self.workdir+"/BIAS"):
        self.bias = True
        bfiles = glob.glob(self.workdir+"/BIAS/*cr2")
@@ -236,6 +268,7 @@ class MYPhot_Core:
          # get the two green channels
          g1 = raw.raw_image[1::2,::2]
          g2 = raw.raw_image[::2,1::2]
+         b1 = raw.raw_image[1::2,1::2]
 
          # average the two channels and remove CANON offset
          green = 0.5*(g1+g2) - 2047
@@ -245,14 +278,19 @@ class MYPhot_Core:
          exif = image.read_exif()
          items = exif.items()
          hdu = fits.PrimaryHDU(green.astype('float32'))
+         hdu1 = fits.PrimaryHDU(b1.astype('float32'))
+
          for it in items:
            if (it[0] == 'Exif.Photo.ISOSpeedRatings'):
              hdu.header['ISO']=it[1]
+             hdu1.header['ISO']=it[1]
            if (it[0] == 'Exif.Photo.ExposureTime'):
              first,second=it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
+             hdu1.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/BIAS/bias_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/BIAS/bias_V_{i+1}.fits',overwrite=True)
+         hdu1.writeto(f'{self.workdir}/BIAS/bias_B_{i+1}.fits',overwrite=True)
 
      logger.info("Create DARK FITS files")
      if os.path.exists(self.workdir+"/DARK"):
@@ -266,6 +304,7 @@ class MYPhot_Core:
          # get the two green channels
          g1 = raw.raw_image[1::2,::2]
          g2 = raw.raw_image[::2,1::2]
+         b1 = raw.raw_image[1::2,1::2]
 
          green = 0.5*(g1+g2) - 2047
 
@@ -274,14 +313,18 @@ class MYPhot_Core:
          exif = image.read_exif()
          items = exif.items()
          hdu = fits.PrimaryHDU(green.astype('float32'))
+         hdu1 = fits.PrimaryHDU(b1.astype('float32'))
          for it in items:
            if (it[0] == 'Exif.Photo.ISOSpeedRatings'):
              hdu.header['ISO']=it[1]
+             hdu1.header['ISO']=it[1]
            if (it[1] == 'Exif.Photo.ExposureTime'):
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
+             hdu1.header['EXPTIME']=np.float32(first)/np.float(second)
 
-         hdu.writeto(f'{self.workdir}/DARK/dark_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/DARK/dark_V_{i+1}.fits',overwrite=True)
+         hdu1.writeto(f'{self.workdir}/DARK/dark_B_{i+1}.fits',overwrite=True)
 
      logger.info("Create DARKFLAT FITS files")
      if os.path.exists(self.workdir+"/DARKFLAT"):
@@ -295,7 +338,7 @@ class MYPhot_Core:
          # get the two green channels
          g1 = raw.raw_image[1::2,::2]
          g2 = raw.raw_image[::2,1::2]
-
+         b1 = raw.raw_image[1::2,1::2]
          green = 0.5*(g1+g2) - 2047
 
          # prepare to write fits
@@ -303,14 +346,18 @@ class MYPhot_Core:
          exif = image.read_exif()
          items = exif.items()
          hdu = fits.PrimaryHDU(green.astype('float32'))
+         hdu1 = fits.PrimaryHDU(b1.astype('float32'))
          for it in items:
            if (it[0] == 'Exif.Photo.ISOSpeedRatings'):
              hdu.header['ISO']=it[1]
+             hdu1.header['ISO']=it[1]
            if (it[1] == 'Exif.Photo.ExposureTime'):
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
+             hdu1.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/DARKFLAT/darkflat_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/DARKFLAT/darkflat_V_{i+1}.fits',overwrite=True)
+         hdu1.writeto(f'{self.workdir}/DARKFLAT/darkflat_B_{i+1}.fits',overwrite=True)
 
      logger.info("Create FLAT FITS files")
      if os.path.exists(self.workdir+"/FLAT"):
@@ -324,7 +371,7 @@ class MYPhot_Core:
          # get the two green channels
          g1 = raw.raw_image[1::2,::2]
          g2 = raw.raw_image[::2,1::2]
-
+         b1 = raw.raw_image[1::2,1::2] - 2047
          green = 0.5*(g1+g2) - 2047
 
          # prepare to write fits
@@ -332,14 +379,18 @@ class MYPhot_Core:
          exif = image.read_exif()
          items = exif.items()
          hdu = fits.PrimaryHDU(green.astype('float32'))
+         hdu1 = fits.PrimaryHDU(b1.astype('float32'))
          for it in items:
            if (it[0] == 'Exif.Photo.ISOSpeedRatings'):
              hdu.header['ISO']=it[1]
+             hdu1.header['ISO']=it[1]
            if (it[1] == 'Exif.Photo.ExposureTime'):
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
+             hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
 
-         hdu.writeto(f'{self.workdir}/FLAT/flat_{i+1}.fits',overwrite=True)
+         hdu.writeto(f'{self.workdir}/FLAT/flat_V_{i+1}.fits',overwrite=True)
+         hdu1.writeto(f'{self.workdir}/FLAT/flat_B_{i+1}.fits',overwrite=True)
 
      logger.info("Create LIGHT FITS files")
      if os.path.exists(self.workdir+"/LIGHT"):
@@ -353,6 +404,7 @@ class MYPhot_Core:
          # get the two green channels
          g1 = raw.raw_image[1::2,::2]
          g2 = raw.raw_image[::2,1::2]
+         b1 = raw.raw_image[1::2,1::2] - 2047
 
          green = 0.5*(g1+g2) - 2047
 
@@ -361,6 +413,7 @@ class MYPhot_Core:
          exif = image.read_exif()
          items = exif.items()
          hdu = fits.PrimaryHDU(green.astype('float32'))
+         hdu1 = fits.PrimaryHDU(b1.astype('float32'))
          utcoffset = 2.*u.hour
          for it in items:
            if (it[0] == 'Exif.Image.DateTime'):
@@ -369,31 +422,45 @@ class MYPhot_Core:
             timstart=f'{b.hour}:{b.minute}:{b.second}'
            if (it[0] == 'Exif.Photo.ISOSpeedRatings'):
              hdu.header['ISO']=it[1]
+             hdu1.header['ISO']=it[1]
            if (it[1] == 'Exif.Photo.ExposureTime'):
              first,second = it[1].split("/")
              hdu.header['EXPTIME']=np.float32(first)/np.float32(second)
+             hdu1.header['EXPTIME']=np.float32(first)/np.float32(second)
          obs_location = EarthLocation(lat=45.53*u.deg,lon=9.4*u.deg,height=133*u.m)
          time = Time(f"{date_obs}T{timstart}",format='isot')-utcoffset
          time.format='fits'
          hdu.header['DATE-OBS']=(time.value,'[UTC] Start time of exposure')
+         hdu1.header['DATE-OBS']=(time.value,'[UTC] Start time of exposure')
          rastr, decstr = self.get_target_radec()
          c=SkyCoord([f"{rastr} {decstr}"],frame='icrs',unit=(u.hourangle,u.deg))
          caltaz = c.transform_to(AltAz(obstime=time,location=obs_location))
-         hdu.header['AIRMASS']=(np.float32(caltaz.secz[0]),'Airmass value')
+         m = np.float32(caltaz.secz[0])
+         airmass = self._compute_airmass(m)
+         hdu.header['AIRMASS']=(airmass,'Airmass value')
+         hdu1.header['AIRMASS']=(airmass,'Airmass value')
 
          # add other useful keywords to LIGHT frames
          hdu.header['OBJECT'] = (self.target[0],'Object Name')
-         hdu.writeto(f'{self.workdir}/LIGHT/light_{i+1}.fits',overwrite=True)
+         hdu1.header['OBJECT']= (self.target[0],'Object Name')
+         hdu.writeto(f'{self.workdir}/LIGHT/light_V_{i+1}.fits',overwrite=True)
+         hdu1.writeto(f'{self.workdir}/LIGHT/light_B_{i+1}.fits',overwrite=True)
 
-   def _compute_gain_rnoise(self):
+   def _compute_airmass(self,m):
+    """ 
+    Return airmass 
+    """
+    return m - 0.0018167*(m-1) - 0.002875*(m-1)**2 - 0.0008083*(m-1)**3
+
+   def _compute_gain_rnoise(self,filter):
     """
       Compute Gain and Read-out noise from Bias and Flat frames
     """
     logger.info("Computing GAIN and ReadOut Noise")
-    biasfile1 = f"{self.workdir}/BIAS/bias_1.fits"
-    biasfile2 = f"{self.workdir}/BIAS/bias_3.fits"
-    flatfile1 = f"{self.workdir}/FLAT/flat_1.fits"
-    flatfile2 = f"{self.workdir}/FLAT/flat_3.fits"
+    biasfile1 = f"{self.workdir}/BIAS/bias_{filter}_1.fits"
+    biasfile2 = f"{self.workdir}/BIAS/bias_{filter}_3.fits"
+    flatfile1 = f"{self.workdir}/FLAT/flat_{filter}_1.fits"
+    flatfile2 = f"{self.workdir}/FLAT/flat_{filter}_3.fits"
 
     bias1 = fits.getdata(biasfile1)
     bias2 = fits.getdata(biasfile2)
@@ -425,7 +492,7 @@ class MYPhot_Core:
      
      return ra,dec
    
-   def compute_allobject_photometry(self):
+   def compute_allobject_photometry(self,filter):
     """ 
       Compute all objects photometry. For each calibrated frames
       - detector sources
@@ -439,18 +506,18 @@ class MYPhot_Core:
 
     self.naper = len(aper_radii)
 
-    checkfiles = glob.glob(f"{self.workdir}/Solved/*-cat.fits")
+    checkfiles = glob.glob(f"{self.workdir}/Solved/*{filter}-cat.fits")
     if len(checkfiles) > 0:
       logger.info("Photometry already computed  - skipping catalog creation")
     else:
       logger.info("Computing Aperture Photometry for all the objects")
-      cfiles = glob.glob(f"{self.workdir}/Solved/*wcs.fits")
+      cfiles = glob.glob(f"{self.workdir}/Solved/*{filter}*wcs.fits")
       cfiles.sort()
 
       for i,ifile in enumerate(cfiles):
         logger.info(f"aperture photometry for {i+1}/{len(cfiles)} - {ifile}")
         rootname,_ = os.path.splitext(ifile)
-        catfile = rootname+'-cat.fits'
+        catfile = rootname+f'_{filter}-cat.fits'
         data = fits.getdata(ifile)
 
         # mask to get background estimation
@@ -477,6 +544,114 @@ class MYPhot_Core:
         aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
       
         aper_phot.write(catfile,overwrite=True)
+
+   def get_first_tramsformation(self):
+     """
+     This function returns the first transformation to get Johnson-V mags
+     It stars from the TG and TB photometry of a set of stars (those with
+     mag lower than the saturation)
+     """
+     # get name, position and catalog V and B mag for list of stars
+     res = self.get_ra_dec_for_objects()
+     
+     # for each star compute the color index (B-V)
+     star_names = []
+     cat_V_mag=[]
+     color_index = []
+     star_coord = []
+     for istar in range(len(res)-8,len(res)):
+       star_names.append(res[istar][0])
+       star_coord.append(SkyCoord([f"{res[istar][1]} {res[istar][2]}"],frame='icrs',unit=(u.hourangle,u.deg)))
+       color_index.append(res[istar][4]-res[istar][3])
+       cat_V_mag.append(res[istar][3])
+
+     # now get instrumental mag for this set of stars  
+     catfiles_V = glob.glob(f"{self.workdir}/Solved/*V*-cat.fits")
+     catfiles_V.sort()
+     catfiles_B = glob.glob(f"{self.workdir}/Solved/*B*-cat.fits")
+     catfiles_B.sort()
+
+     V_meanTG = []
+     b_v = []
+     for i in enumerate(star_names):
+       temp_G = []
+       temp_B = []
+       for i,vfile,bfile in enumerate(zip(catfiles_V,catfiles_B)):
+         logger.info(f"reading catfiles {i+1}/{len(catfiles_V)} - {vfile}")
+         rootname,_ = os.path.splitext(vfile)
+         sciframe_V = rootname[:-4]
+         rootname,_ = os.path.splitext(bfile)
+         sciframe_B = rootname[:-4]
+
+         logger.info("creating WCS for the selected catalog")
+         head = fits.getheader(sciframe_V+".fits")
+         w_V = WCS(head)
+         # open the catalog
+         cat_V = fits.getdata(vfile)
+         xc_V = cat_V['xcenter']
+         yc_V = cat_V['ycenter']
+         cat_B = fits.getdata(bfile)
+         xc_B = cat_B['xcenter']
+         yc_B = cat_B['ycenter']
+
+         x_V,y_V = w_V.world_to_pixel(star_coord[i])
+         x_B,y_B = w_B.world_to_pixel(star_coord[i])
+         d_V = np.sqrt((xc_V-x_V)**2 + (yc_V-y_V)**2)
+         d_B = np.sqrt((xc_B-x_B)**2 + (yc_B-y_B)**2)
+         idxV = np.argmin(d_V)
+         icat_V=cat_V[idxV]
+         idxB = np.argmin(d_B)
+         icat_B=cat_B[idxB]
+         if d_V[idxV] <3 and d_B[idxB] < 3:
+           # now compute the instrumental mag
+           innerV = icat_V['aperture_sum_9']
+           outerV = icat_V['aperture_sum_14']-icatV['aperture_sum_12']
+           innterB = icat_B['aperture_sum_9']
+           outerB = icat_B['aperture_sum_14']-icat_B['aperture_sum_12']
+           temp_G.append(-2.5*np.log10(innerV-outerV))
+           temp_B.append(-2.5*np.log10(innerB-outputB)-(-2.5*np.log10(innerV-outerV)))
+
+
+       V_meanTG.append(cat_V_mag[i] - np.mean(temp_G))    
+       b_v.append(np.mean(temp_B)-np.mean(temp_G))
+
+     # now fit V_cat - mean_TG and (B_cat-V_cat)
+     m1, b1 = np.polyfit(color_index,V_meanTG,1)
+     logger.info("Derived params for Johnson-V transformation: V -Tg and (B-V)")
+     logger.info(f"Slope = {m1}")
+     logger.info(f"Intercept = {b1}")
+
+     m2, b2 = np.polyfit(color_index,b_v,1)
+     logger.info("Derived params for Johnson-B transformation: b-v and (B-V)")
+     logger.info(f"Slope = {m2}")
+     logger.indo(f"Intercept = {b2}")
+
+     # the required number is m1/m2
+     logger.info("Parameter to correct target/comparison measured color") 
+     self.correct_bv = m1/m2
+     logger.info(f"Coeff for Delta(b-v): {self.correct_bv}")
+     return self.correct_bv
+
+   def get_ra_dec_for_objects(self):
+    """
+    This function return as a list the reference stars within the observed field
+    around the target star. Select at lest 10 stars that will be used to
+    compute the transformation from TG to V knowing the color index of the 
+    measured stars
+    """
+
+    with open(self.target,'r') as f:
+      info = json.load(f)
+
+    star_name = info[0][0]
+    result = []
+    vsp_template = 'https://www.aavso.org/apps/vsp/api/chart/?format=json&fov=120&star={}&maglimit={}'
+    query = vsp_template.format(star_name,self.maglim)
+    record = requests.get(query).json()
+
+    [result.append([d['auid'],d['ra'],d['dec'],d['bands'][0]['mag'],d['bands'][1]['mag']]) for d in record["photometry"]]
+
+    return result
 
    def get_target_comp_valid_photometry(self):
      """

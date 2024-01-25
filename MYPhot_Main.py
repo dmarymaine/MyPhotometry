@@ -12,6 +12,7 @@
 
 import argparse
 import json
+import glob
 import numpy as np
 
 import MYPhot_Logging as log
@@ -50,6 +51,9 @@ parser.add_argument('--plot_light_curve',dest='plot_light_curve',action='store_t
 parser.add_argument('--maglim',dest='maglim',required=True,
                     help='magnitude limit for the AAVSO chart for selecting field stars')
 
+parser.add_argument('--magmax',dest='magmax',required=True,
+                    help='max mag value for computing magnitude transformation')
+
 # output report
 parser.add_argument('--aavso',dest='aavso',action='store_true',
                     help='whether produce an aavso output file')
@@ -87,15 +91,24 @@ filters = ['V','B']
 for filter in filters:
   myphot.compute_allobject_photometry(filter)
 
+# new compute the transformation from TG to Johnson-V mag
+coeff = myphot.get_first_tramsformation()
+
 # now create circular apertures around the target, comparison and 
-# validation stars. 
-myphot.get_target_comp_valid_photometry()
+# validation stars.
+files = glob.glob(f"{args.workdir}/Solved/p*{filters[0]}*-cat.fits")
+myphot.set_output_data(files)
+
+for filter in filters:
+  myphot.get_target_comp_valid_photometry(filter)
 
 # now create a plot of one image with apertures
-myphot.show_apertures()
+for filter in filters:
+  myphot.show_apertures(filter)
 
 # now plot radial profile to check which aperture is optimal
-myphot.show_radial_profiles()
+#for filter in filters:
+#  myphot.show_radial_profiles(filter)
 
 # user can specify the radius for proper photometry
 with open(apertures_json,'r') as f:
@@ -109,17 +122,16 @@ radius = int(radius_str)
 idx = radii.index(radius)
 logger.info(f"Optimal selected radius is {radius} pixels #{idx+1} in the list")
 
-inner_str = input("Enter inner anulus radius:")
-outer_str = input("Enter output anulus radius:")
-idx_in = radii.index(int(inner_str))
-idx_out = radii.index(int(outer_str))
-
 logger.info("Computing magnitudes")
-myphot.calculate_mag(idx,idx_in,idx_out)
+myphot.calculate_mag(idx)
 
 if (args.plot_light_curve):
   logger.info("Plotting light curve")
   myphot.plot_light_curve(idx)
+
+if (args.aavso):
+  logger.info("Creating report for AAVSO submission")
+  myphot.aavso()
 
 logger.info("Done")
 

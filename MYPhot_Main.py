@@ -86,8 +86,14 @@ myphot = MYPhot_Core(args)
 
 myphot.exec()
 
-# compute photometry for all objects (creating catalogs)
+# after plate-solving image we can proceed with register them 
+# and finally staking them using siril-cli
 filters = ['V','B']
+for filter in filters:
+  myphot.stack(filter)
+  myphot.plate_solve(filter)
+  
+# compute photometry for all objects (creating catalogs)
 for filter in filters:
   myphot.compute_allobject_photometry(filter)
 

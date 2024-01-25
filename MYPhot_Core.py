@@ -558,7 +558,7 @@ class MYPhot_Core:
     self.naper = len(aper_radii)
 
     logger.info("Computing Aperture Photometry for all the objects")
-    cfiles = glob.glob(f"{self.workdir}/Solved/*{filter}*wcs.fits")
+    cfiles = glob.glob(f"{self.workdir}/Solved/stack*{filter}.fits")
     cfiles.sort()
 
     for i,ifile in enumerate(cfiles):
@@ -843,7 +843,7 @@ class MYPhot_Core:
       Show one image with apertures on the target, comparison and
       check stars
      """
-     cfiles = glob.glob(f"{self.workdir}/Solved/p*{filter}*wcs.fits")
+     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}.fits")
      cfiles.sort()
      data = fits.getdata(cfiles[0])
        
@@ -874,17 +874,17 @@ class MYPhot_Core:
      """
        Show radial profiles to check which aperture is the correct one
      """
-     cfiles = glob.glob(f"{self.workdir}/Solved/p_*{filter}*wcs.fits")
+     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}.fits")
      cfiles.sort()
-     data = fits.getdata(cfiles[3])
+     data = fits.getdata(cfiles[0])
      if filter == 'V':
       idfilter = 0
      if filter == 'B':
       idfilter = 1
 
-     xycen_t = centroid_quadratic(data,xpeak=self.x_t[3,idfilter],ypeak=self.y_t[3,idfilter])
-     xycen_c = centroid_quadratic(data,xpeak=self.x_c[3,idfilter],ypeak=self.y_c[3,idfilter])
-     xycen_v = centroid_quadratic(data,xpeak=self.x_v[3,idfilter],ypeak=self.y_v[3,idfilter])
+     xycen_t = centroid_quadratic(data,xpeak=self.x_t[0,idfilter],ypeak=self.y_t[0,idfilter])
+     xycen_c = centroid_quadratic(data,xpeak=self.x_c[0,idfilter],ypeak=self.y_c[0,idfilter])
+     xycen_v = centroid_quadratic(data,xpeak=self.x_v[0,idfilter],ypeak=self.y_v[0,idfilter])
      edge_radii = np.arange(25)
      rp_t = RadialProfile(data,xycen_t,edge_radii,error=None,mask=None)
      rp_c = RadialProfile(data,xycen_c,edge_radii,error=None,mask=None)
@@ -1011,6 +1011,8 @@ class MYPhot_Core:
       webobs.write(result_template.format(info[0][0],self.jd,self.JohnV_t,self.t_mag_std,"V",
                            info[1][0],info[1][3],info[2][0],self.v_mag_ave,np.mean(self.airmass),self.chartid," "))
 
+   
+   
    def exec(self):
      """ main point with the actual execution of the main steps.
          if preprocessing has to be executed produce the results

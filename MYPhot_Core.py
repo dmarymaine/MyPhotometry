@@ -14,7 +14,7 @@ import requests
 from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.time import Time
-from astropy.stats import sigma_clipped_stats, SigmaClip
+from astropy.stats import sigma_clipped_stats, SigmaClip, mad_std
 from photutils.utils import calc_total_error
 from photutils.centroids import centroid_quadratic
 from photutils.profiles import RadialProfile
@@ -558,20 +558,21 @@ class MYPhot_Core:
     self.naper = len(aper_radii)
 
     logger.info("Computing Aperture Photometry for all the objects")
-    cfiles = glob.glob(f"{self.workdir}/Solved/stack*{filter}.fits")
+    cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
     cfiles.sort()
 
     for i,ifile in enumerate(cfiles):
       logger.info(f"aperture photometry for {i+1}/{len(cfiles)} - {ifile}")
-      rootname,_ = os.path.splitext(ifile)
-      catfile = rootname+f'_{filter}-cat.fits'
-      if os.path.exists(catfile):
+      basename = os.path.basename(ifile)
+      rootname,_ = os.path.splitext(basename)
+      catfile = f'cat_{rootname[4:]}.fits'
+      if os.path.exists(f'{self.workdir}/Solved/{catfile}'):
         logger.info(f"Catalog {catfile} already created - skipit")
       else: 
         data = fits.getdata(ifile)
 
         # mask to get background estimation
-        sigma_clip = SigmaClip(sigma=3.5)
+        sigma_clip = SigmaClip(sigma=3)
         mask = pht.make_source_mask(data,nsigma=3,npixels=5,dilate_size=10)
         bkg_estimator = pht.SExtractorBackground()
         bkg = pht.Background2D(data,(64,64),mask=mask,filter_size=(3,3),sigma_clip=sigma_clip,
@@ -585,7 +586,7 @@ class MYPhot_Core:
           axs[1].set_title("background rms")
           plt.show(block=True)
 
-        daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
+        daofind = pht.IRAFStarFinder(fwhm=5.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
                   sharplo=0.5,sharphi=2.0,roundlo=0.0,roundhi=0.7)
         sources = daofind(data - bkg.background)
         positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
@@ -593,7 +594,7 @@ class MYPhot_Core:
         error = calc_total_error(data-bkg.background,bkg.background_rms,self.gain)
         aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
       
-        aper_phot.write(catfile,overwrite=True)
+        aper_phot.write(f'{self.workdir}/Solved/{catfile}',overwrite=True)
 
    def get_first_tramsformation(self):
      """
@@ -616,9 +617,9 @@ class MYPhot_Core:
        cat_V_mag.append(res[istar][3])
 
      # now get instrumental mag for this set of stars  
-     catfiles_V = glob.glob(f"{self.workdir}/Solved/*V*-cat.fits")
+     catfiles_V = glob.glob(f"{self.workdir}/Solved/cat*V*.fits")
      catfiles_V.sort()
-     catfiles_B = glob.glob(f"{self.workdir}/Solved/*B*-cat.fits")
+     catfiles_B = glob.glob(f"{self.workdir}/Solved/cat*B*.fits")
      catfiles_B.sort()
 
      V_meanTG = []
@@ -630,10 +631,12 @@ class MYPhot_Core:
          vfile = catfiles_V[j]
          bfile = catfiles_B[j]
          #logger.info(f"reading catfiles {j+1}/{len(catfiles_V)} - {vfile}")
-         rootname,_ = os.path.splitext(vfile)
-         sciframe_V = rootname[:-6]
-         rootname,_ = os.path.splitext(bfile)
-         sciframe_B = rootname[:-6]
+         basename_V = os.path.basename(vfile)
+         rootname,_ = os.path.splitext(basename_V)
+         sciframe_V = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
+         basename_B = os.path.basename(bfile)
+         rootname,_ = os.path.splitext(basename_B)
+         sciframe_B = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
 
          #logger.info("creating WCS for the selected catalog")
          head = fits.getheader(sciframe_V+".fits")
@@ -739,7 +742,7 @@ class MYPhot_Core:
      if filter == 'B':
        idfilter = 1
 
-     catfiles = glob.glob(f"{self.workdir}/Solved/*{filter}-cat.fits")
+     catfiles = glob.glob(f"{self.workdir}/Solved/cat*{filter}*.fits")
      catfiles.sort()
 
      with open(self.target,'r') as f:
@@ -767,9 +770,10 @@ class MYPhot_Core:
      # now loop over the catalogs, read WCS from calibrated frames and get required stars
      for i,ifile in enumerate(catfiles):
         logger.info(f"reading catfiles {i+1}/{len(catfiles)} - {ifile}")
-        rootname,_ = os.path.splitext(ifile)
+        basename = os.path.basename(ifile)
+        rootname,_ = os.path.splitext(basename)
         #remove the last 4 spaces from file name to get the calibrated frame
-        sciframe = rootname[:-6]
+        sciframe = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
 
         # read sci header, create WCS and get (x,y) for T,C and V stars
         logger.info("creating WCS for the selected catalog")
@@ -843,7 +847,7 @@ class MYPhot_Core:
       Show one image with apertures on the target, comparison and
       check stars
      """
-     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}.fits")
+     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
      cfiles.sort()
      data = fits.getdata(cfiles[0])
        
@@ -874,7 +878,7 @@ class MYPhot_Core:
      """
        Show radial profiles to check which aperture is the correct one
      """
-     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}.fits")
+     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
      cfiles.sort()
      data = fits.getdata(cfiles[0])
      if filter == 'V':
@@ -909,15 +913,19 @@ class MYPhot_Core:
       info = json.load(f)
      
      magc_cat = info[1][3]
-
+     naper = np.int32(0.5*(len(self.out_target[:,0,0])-1))
+     logger.info(f"Number of apertures used for photometry {naper}")
      t_insmag_V = []
      c_insmag_V = []
      v_insmag_V = []
      for i in range(0,len(self.out_target[iaper,:,0])):
-       if np.isfinite(self.out_target[iaper+1,i,0]) and np.isfinite(self.out_compar[iaper,i,0]) and np.isfinite(self.out_valide[iaper,i,0]):
-        t_insmag_V.append(-2.5*np.log10(self.out_target[iaper+1,i,0]))
-        c_insmag_V.append(-2.5*np.log10(self.out_compar[iaper+1,i,0]))
-        v_insmag_V.append(-2.5*np.log10(self.out_valide[iaper+1,i,0]))
+       if np.isfinite(self.out_target[iaper+1,i,0]) and np.isfinite(self.out_compar[iaper+1,i,0]) and np.isfinite(self.out_valide[iaper+1,i,0]):
+        anulus = self.out_target[naper-1,i,0] - self.out_target[naper-2,i,0]
+        t_insmag_V.append(-2.5*np.log10(self.out_target[iaper+1,i,0]-anulus))
+        anulus = self.out_compar[naper-1,i,0] - self.out_compar[naper-2,i,0]
+        c_insmag_V.append(-2.5*np.log10(self.out_compar[iaper+1,i,0]-anulus))
+        anulus = self.out_valide[naper-1,i,0] - self.out_valide[naper-2,i,0]
+        v_insmag_V.append(-2.5*np.log10(self.out_valide[iaper+1,i,0]-anulus))
 
      t_mag = []
      v_mag = []
@@ -929,10 +937,10 @@ class MYPhot_Core:
      self.v_mag_ave = np.mean(v_mag)
      self.t_mag_std = np.std(t_mag)
      self.v_mag_std = np.std(v_mag)
-#     t_mag_ave = np.median(t_mag)
-#     v_mag_ave = np.median(v_mag)
-#     t_mag_std = 1.253*np.std(t_mag)/np.sqrt(len(t_mag))
-#     v_mag_std = 1.253*np.std(v_mag)/np.sqrt(len(v_mag))
+#     self.t_mag_ave = np.median(t_mag)
+#     self.v_mag_ave = np.median(v_mag)
+#     self.t_mag_std = 1.253*np.std(t_mag)/np.sqrt(len(t_mag))
+#     self.v_mag_std = 1.253*np.std(v_mag)/np.sqrt(len(v_mag))
 
      self.jd = np.mean(self.out_target[0,:,0])
      logger.info(f"JD: {np.mean(self.out_target[:,0,0])}")
@@ -947,8 +955,10 @@ class MYPhot_Core:
      c_insmag_B = []
      for i in range(0,len(self.out_target[iaper,:,1])):
       if (np.isfinite(self.out_target[iaper,i,1]) and np.isfinite(self.out_compar[iaper+1,i,1])):
-       t_insmag_B.append(-2.5*np.log10(self.out_target[iaper+1,i,1]))
-       c_insmag_B.append(-2.5*np.log10(self.out_compar[iaper+1,i,1]))
+       anulus = self.out_target[naper-1,i,1] - self.out_target[naper-2,i,1]
+       t_insmag_B.append(-2.5*np.log10(self.out_target[iaper+1,i,1]-anulus))
+       anulus = self.out_compar[naper-1,i,1] - self.out_compar[naper-2,i,1]
+       c_insmag_B.append(-2.5*np.log10(self.out_compar[iaper+1,i,1]-anulus))
 
      b_minus_v_t = np.mean(t_insmag_B) - np.mean(t_insmag_V)     
      b_minus_v_c = np.mean(c_insmag_B) - np.mean(c_insmag_V)
@@ -1006,7 +1016,7 @@ class MYPhot_Core:
       info = json.load(f)
 
     result_template = "{0},{1:1.6f},{2:1.6f},{3:1.6f},{4},YES,STD,{5},{6:1.6f},{7},{8:1.6f},{9},NA,{10},{11}\n"
-    with open(f"{self.workdir}/webobs_{self.jd}.csv",'w') as webobs:
+    with open(f"{self.workdir}/webobs_{info[0][0]}_{self.jd}.csv",'w') as webobs:
       webobs.write(header_template.format(obscode,"MYPhotometry"))
       webobs.write(result_template.format(info[0][0],self.jd,self.JohnV_t,self.t_mag_std,"V",
                            info[1][0],info[1][3],info[2][0],self.v_mag_ave,np.mean(self.airmass),self.chartid," "))
@@ -1030,6 +1040,7 @@ class MYPhot_Core:
        rfiles = glob.glob(self.workdir+"/Reduced/p_light*.fits")
        rfiles.sort()
        self.filename = rfiles
+
        # since pre-processing is not performed get the GAIN and RDNOISE from
        # FITS keywords
        head = fits.getheader(rfiles[0])
@@ -1046,8 +1057,8 @@ class MYPhot_Core:
        logger.info(f"Get astrometric solution {i+1}/{len(self.filename)} - {ifile}")
        basename = os.path.basename(ifile)
        rootname,_ = os.path.splitext(basename)
-       
-       if os.path.exists(f"{self.workdir}/Solved/{rootname}_wcs.fits"):
+    
+       if os.path.exists(f"{self.workdir}/Solved/wcs_{rootname}.fits"):
         logger.info("Image already Solved - skip it") 
        else:  
          # it uses astap to create astrometric solution
@@ -1055,9 +1066,8 @@ class MYPhot_Core:
          ra = np.int16(rastr[:2])
          dec = 90 + np.int16(decstr[:3])
 
-         indir,infile = os.path.split(ifile)
-         rootname,_ = os.path.splitext(infile)
-
          #os.system(f"astap -f {ifile} -ra {ra} -spd {dec} - r 30 -fov 1.48 -o {self.workdir}/Reduced/test")
          os.system(f"solve-field --scale-units arcsecperpix --scale-low 3. --scale-high 3.5 {ifile} -D {self.workdir}/Solved --no-plots")
          os.system(f"mv {self.workdir}/Solved/{rootname}.new {self.workdir}/Solved/wcs_{rootname}.fits")
+         os.system(f"rm {self.workdir}/Solved/*.corr {self.workdir}/Solved/*.axy {self.workdir}/Solved/*.match {self.workdir}/Solved/*.wcs")
+         os.system(f"rm {self.workdir}/Solved/*xyls {self.workdir}/Solved/*.rdls {self.workdir}/Solved/*solved")

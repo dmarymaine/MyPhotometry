@@ -86,12 +86,7 @@ myphot = MYPhot_Core(args)
 
 myphot.exec()
 
-# after plate-solving image we can proceed with register them 
-# and finally staking them using siril-cli
 filters = ['V','B']
-for filter in filters:
-  myphot.stack(filter)
-  myphot.plate_solve(filter)
   
 # compute photometry for all objects (creating catalogs)
 for filter in filters:
@@ -102,7 +97,7 @@ coeff = myphot.get_first_tramsformation()
 
 # now create circular apertures around the target, comparison and 
 # validation stars.
-files = glob.glob(f"{args.workdir}/Solved/p*{filters[0]}*-cat.fits")
+files = glob.glob(f"{args.workdir}/Solved/cat*{filters[0]}*.fits")
 myphot.set_output_data(files)
 
 for filter in filters:

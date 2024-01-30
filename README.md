@@ -18,3 +18,5 @@ You can also work with Canon RAW data file (.CR2). The code firstly
 extract the two green channels and create FITS files for all your data.
 Then it goes to pre-processing with FITS only files.
 
+In the no-cat branch (this branch) catalogs are not created. Everything is 
+performed at image level using WCS.

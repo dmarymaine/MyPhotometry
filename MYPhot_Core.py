@@ -47,6 +47,9 @@ class MYPhot_Core:
      self.out_target = None
      self.out_compar = None
      self.out_valide = None
+     self.phot = None
+     self.inn = None
+     self.out = None
      self.x_t = None
      self.y_t = None
      self.x_c = None
@@ -82,6 +85,9 @@ class MYPhot_Core:
      self.y_c = np.zeros((len(files),len(self.filters)))
      self.x_v = np.zeros((len(files),len(self.filters)))
      self.y_v = np.zeros((len(files),len(self.filters)))
+     self.phot = np.zeros((len(self.sources),len(self.filters)))
+     self.inn = np.zeros((len(self.sources),len(self.filters)))
+     self.out = np.zeros((len(self.sources),len(self.filters)))
      self.airmass = np.zeros((len(files)))
 
    def _get_green(self,data):
@@ -543,6 +549,28 @@ class MYPhot_Core:
      
      return ra,dec
    
+   def compute_allobject_photometry_image(self,filter):
+    with open(self.apertures,'r') as f:
+      list_aper = json.load(f)
+
+    circle = list_aper[0]
+    inner = list_aper[1]
+    outer = list_aper[2]
+
+    logger.info("Computing Aperture Photometry for all objects in the chart")
+    imfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
+    imfiles.sort()
+
+    res = self.get_ra_dec_for_objects()
+    for iobj in range(0,self.sources):
+      skycoord = SkyCoord(f"{res[iobj][1]} {res[iobj][2]}",frame='icrs',unit=(u.hourangle,u.deg))
+      for i,ifile in enumerate(imfiles):
+        head = getheader(ifile)
+        wcs = WCS(head)
+        xy = SkyCoord.to_pixel(skycoord,wcs=wcs,origin=1)
+
+
+
    def compute_allobject_photometry(self,filter):
     """ 
       Compute all objects photometry. For each calibrated frames
@@ -556,6 +584,7 @@ class MYPhot_Core:
       aper_radii = json.load(f)
 
     self.naper = len(aper_radii)
+    self.set_output_data(filter)
 
     logger.info("Computing Aperture Photometry for all the objects")
     cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
@@ -724,6 +753,7 @@ class MYPhot_Core:
     record = requests.get(query).json()
     self.chartid = record['chartid']
     [result.append([d['auid'],d['ra'],d['dec'],d['bands'][0]['mag'],d['bands'][1]['mag']]) for d in record["photometry"]]
+    self.sources = len(result)
 
     return result
 

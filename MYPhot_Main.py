@@ -88,17 +88,17 @@ myphot.exec()
 
 filters = ['V','B']
   
+# now create circular apertures around the target, comparison and 
+# validation stars.
+files = glob.glob(f"{args.workdir}/Solved/wcs*{filters[0]}*.fits")
+myphot.set_output_data(files)
+
 # compute photometry for all objects (creating catalogs)
 for filter in filters:
-  myphot.compute_allobject_photometry(filter)
+  myphot.compute_allobject_photometry_image(filter)
 
 # new compute the transformation from TG to Johnson-V mag
 coeff = myphot.get_first_tramsformation()
-
-# now create circular apertures around the target, comparison and 
-# validation stars.
-files = glob.glob(f"{args.workdir}/Solved/cat*{filters[0]}*.fits")
-myphot.set_output_data(files)
 
 for filter in filters:
   myphot.get_target_comp_valid_photometry(filter)

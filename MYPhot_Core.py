@@ -586,14 +586,14 @@ class MYPhot_Core:
           axs[1].set_title("background rms")
           plt.show(block=True)
 
-        daofind = pht.IRAFStarFinder(fwhm=5.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
-                  sharplo=0.5,sharphi=2.0,roundlo=0.0,roundhi=0.7)
+        daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=4.*bkg.background_rms_median,exclude_border=True,
+                  sharplo=0.3,sharphi=2.0,roundlo=0.0,roundhi=0.7)
         sources = daofind(data - bkg.background)
         positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
         apert = [pht.CircularAperture(positions,r=r) for r in aper_radii]
         error = calc_total_error(data-bkg.background,bkg.background_rms,self.gain)
-        aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
-      
+#        aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
+        aper_phot = pht.aperture_photometry(data,apert,error=error)     
         aper_phot.write(f'{self.workdir}/Solved/{catfile}',overwrite=True)
 
    def get_first_tramsformation(self):
@@ -630,7 +630,7 @@ class MYPhot_Core:
        for j in range(len(catfiles_V)):
          vfile = catfiles_V[j]
          bfile = catfiles_B[j]
-         #logger.info(f"reading catfiles {j+1}/{len(catfiles_V)} - {vfile}")
+         logger.info(f"reading catfiles {j+1}/{len(catfiles_V)} - {vfile}")
          basename_V = os.path.basename(vfile)
          rootname,_ = os.path.splitext(basename_V)
          sciframe_V = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
@@ -653,12 +653,15 @@ class MYPhot_Core:
 
          x_V,y_V = w_V.world_to_pixel(star_coord[i])
          x_B,y_B = w_B.world_to_pixel(star_coord[i])
+         print (x_V," ",y_V,"  ",x_B," ",y_B)
          d_V = np.sqrt((xc_V-x_V)**2 + (yc_V-y_V)**2)
          d_B = np.sqrt((xc_B-x_B)**2 + (yc_B-y_B)**2)
+         print (f"Min d_V = {np.min(d_V)}")
          idxV = np.argmin(d_V)
          icat_V=cat_V[idxV]
          idxB = np.argmin(d_B)
          icat_B=cat_B[idxB]
+         print (d_V[idxV]," ",xc_V[idxV]," ",yc_V[idxV])
          if d_V[idxV] <4 and d_B[idxB] < 4:
            # now compute the instrumental mag
            innerV = icat_V['aperture_sum_3']

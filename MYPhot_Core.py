@@ -653,15 +653,15 @@ class MYPhot_Core:
 
          x_V,y_V = w_V.world_to_pixel(star_coord[i])
          x_B,y_B = w_B.world_to_pixel(star_coord[i])
-         print (x_V," ",y_V,"  ",x_B," ",y_B)
+         #print (x_V," ",y_V,"  ",x_B," ",y_B)
          d_V = np.sqrt((xc_V-x_V)**2 + (yc_V-y_V)**2)
          d_B = np.sqrt((xc_B-x_B)**2 + (yc_B-y_B)**2)
-         print (f"Min d_V = {np.min(d_V)}")
+         #print (f"Min d_V = {np.min(d_V)}")
          idxV = np.argmin(d_V)
          icat_V=cat_V[idxV]
          idxB = np.argmin(d_B)
          icat_B=cat_B[idxB]
-         print (d_V[idxV]," ",xc_V[idxV]," ",yc_V[idxV])
+         #print (d_V[idxV]," ",xc_V[idxV]," ",yc_V[idxV])
          if d_V[idxV] <4 and d_B[idxB] < 4:
            # now compute the instrumental mag
            innerV = icat_V['aperture_sum_3']
@@ -1022,7 +1022,7 @@ class MYPhot_Core:
     with open(f"{self.workdir}/webobs_{info[0][0]}_{self.jd}.csv",'w') as webobs:
       webobs.write(header_template.format(obscode,"MYPhotometry"))
       webobs.write(result_template.format(info[0][0],self.jd,self.JohnV_t,self.t_mag_std,"V",
-                           info[1][0],info[1][3],info[2][0],self.v_mag_ave,np.mean(self.airmass),self.chartid," "))
+                           info[1][0],info[1][3],info[2][0],self.JohnV_v,np.mean(self.airmass),self.chartid," "))
 
    
    

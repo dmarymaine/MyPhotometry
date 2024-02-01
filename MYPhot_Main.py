@@ -84,7 +84,7 @@ myphot = MYPhot_Core(args)
 # the exec is only either for the preprocessing step or to 
 # populate the local variable with already calibrated frame
 
-#myphot.exec()
+myphot.exec()
 
 filters = ['V','B']
   

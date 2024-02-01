@@ -586,7 +586,7 @@ class MYPhot_Core:
           axs[1].set_title("background rms")
           plt.show(block=True)
 
-        daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=4.*bkg.background_rms_median,exclude_border=True,
+        daofind = pht.IRAFStarFinder(fwhm=3.0,threshold=3.5*bkg.background_rms_median,exclude_border=True,
                   sharplo=0.3,sharphi=2.0,roundlo=0.0,roundhi=0.7)
         sources = daofind(data - bkg.background)
         positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
@@ -610,7 +610,7 @@ class MYPhot_Core:
      cat_V_mag=[]
      color_index = []
      star_coord = []
-     for istar in range(len(res)-8,len(res)):
+     for istar in range(0,len(res[:][0])):
        star_names.append(res[istar][0])
        star_coord.append(SkyCoord([f"{res[istar][1]} {res[istar][2]}"],frame='icrs',unit=(u.hourangle,u.deg)))
        color_index.append(res[istar][4]-res[istar][3])

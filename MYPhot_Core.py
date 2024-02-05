@@ -54,6 +54,7 @@ class MYPhot_Core:
      self.x_v = None
      self.y_v = None
      self.magmax = args.magmax
+     self.maglim = args.maglim
      self.filters = ['V','B']
      self.maglim = args.maglim
      self.correct_bv = None
@@ -610,18 +611,22 @@ class MYPhot_Core:
      cat_V_mag=[]
      color_index = []
      star_coord = []
-     for istar in range(0,len(res[:][0])):
-       star_names.append(res[istar][0])
-       star_coord.append(SkyCoord([f"{res[istar][1]} {res[istar][2]}"],frame='icrs',unit=(u.hourangle,u.deg)))
-       color_index.append(res[istar][4]-res[istar][3])
-       cat_V_mag.append(res[istar][3])
+     numstars = 0
+     for istar in range(0,len(res)): 
+       if res[istar][3] > self.magmax and res[istar][3] < self.maglim:
+         star_names.append(res[istar][0])
+         star_coord.append(SkyCoord([f"{res[istar][1]} {res[istar][2]}"],frame='icrs',unit=(u.hourangle,u.deg)))
+         color_index.append(res[istar][4]-res[istar][3])
+         cat_V_mag.append(res[istar][3])
+         numstars += 1
 
+     logger.info(f"total number of stars used for transformation = {numstars}")
      # now get instrumental mag for this set of stars  
      catfiles_V = glob.glob(f"{self.workdir}/Solved/cat*V*.fits")
      catfiles_V.sort()
      catfiles_B = glob.glob(f"{self.workdir}/Solved/cat*B*.fits")
      catfiles_B.sort()
-
+     ci = []
      V_meanTG = []
      b_v = []
      for i in range(0,len(star_names)):
@@ -637,9 +642,11 @@ class MYPhot_Core:
          basename_B = os.path.basename(bfile)
          rootname,_ = os.path.splitext(basename_B)
          sciframe_B = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
-
+        
          #logger.info("creating WCS for the selected catalog")
          head = fits.getheader(sciframe_V+".fits")
+         t = Time(head['DATE-OBS'],format='isot',scale='utc')
+         airmass = head['AIRMASS']         
          w_V = WCS(head)
          head = fits.getheader(sciframe_B+".fits")
          w_B = WCS(head)
@@ -668,19 +675,29 @@ class MYPhot_Core:
            outerV = icat_V['aperture_sum_6']-icat_V['aperture_sum_5']
            innerB = icat_B['aperture_sum_3']
            outerB = icat_B['aperture_sum_6']-icat_B['aperture_sum_5']
-           temp_G.append(-2.5*np.log10(innerV-outerV))
-           temp_B.append(-2.5*np.log10(innerB-outerB))
-
-       V_meanTG.append(cat_V_mag[i] - np.mean(temp_G))    
-       b_v.append(np.mean(temp_B)-np.mean(temp_G))
+           if (innerV > outerV and innerB > outerB):
+            temp_G.append(-2.5*np.log10(innerV-outerV))
+            temp_B.append(-2.5*np.log10(innerB-outerB))
+           else:
+            temp_G.append(np.nan)
+            temp_B.append(np.nan)
+         else:
+          temp_G.append(np.nan)
+          temp_B.append(np.nan)
+         print(star_names[i]," ",t.jd," ",temp_G[j]," ",temp_B[j]," ",airmass)
+       if sum(~np.isnan(temp_G)) > 0 and sum(~np.isnan(temp_B))> 0:
+    
+        V_meanTG.append(cat_V_mag[i] - np.nanmean(temp_G))    
+        b_v.append(np.nanmean(temp_B)-np.nanmean(temp_G))
+        ci.append(color_index[i])
 
      # now fit V_cat - mean_TG and (B_cat-V_cat)
-     m1, b1 = np.polyfit(color_index,V_meanTG,1)
+     m1, b1 = np.polyfit(ci,V_meanTG,1)
      logger.info("Derived params for Johnson-V transformation: V -Tg and (B-V)")
      logger.info(f"Slope = {m1}")
      logger.info(f"Intercept = {b1}")
         
-     m2, b2 = np.polyfit(color_index,b_v,1)
+     m2, b2 = np.polyfit(ci,b_v,1)
      logger.info("Derived params for Johnson-B transformation: b-v and (B-V)")
      logger.info(f"Slope = {m2}")
      logger.info(f"Intercept = {b2}")
@@ -688,16 +705,16 @@ class MYPhot_Core:
      if self.showplots:
       fig,ax = plt.subplots(1,2,figsize=(16,8))
       poly = np.poly1d([m1,b1])
-      newx = np.linspace(color_index[0],color_index[-1])
+      newx = np.linspace(ci[0],ci[-1])
       newy = poly(newx)
-      ax[0].plot(color_index,V_meanTG,'o',newx,newy)
+      ax[0].plot(ci,V_meanTG,'o',newx,newy)
       ax[0].text(newx[-10],newy[-2],"Slope = {:0.2f}".format(m1))
       ax[0].set_xlabel("B-V",fontsize=20)
       ax[0].set_ylabel("V-v",fontsize=20)
 
       poly = np.poly1d([m2,b2])
       newy = poly(newx)
-      ax[1].plot(color_index,b_v,'o',newx,newy)
+      ax[1].plot(ci,b_v,'o',newx,newy)
       ax[1].text(newx[2],newy[-2],"Slope = {:0.2f}".format(m2))
       ax[1].set_xlabel("B-V",fontsize=20)
       ax[1].set_ylabel("b-v",fontsize=20)
@@ -811,6 +828,7 @@ class MYPhot_Core:
         idx = np.argmin(d_t)
         icat=cat[idx]
         dt = d_t[idx]
+        print(target_name," ",jd," ",self.filters[idfilter]," ",icat['aperture_sum_3']," ",icat['aperture_sum_6']- icat['aperture_sum_5'])
         if dt<4:
           for j in range(naper):
             self.out_target[j+1,i,idfilter]=icat['aperture_sum_'+str(j)]
@@ -916,6 +934,7 @@ class MYPhot_Core:
       info = json.load(f)
      
      magc_cat = info[1][3]
+     magv_cat = info[2][3]
      naper = np.int32(0.5*(len(self.out_target[:,0,0])-1))
      logger.info(f"Number of apertures used for photometry {naper}")
      t_insmag_V = []
@@ -934,14 +953,15 @@ class MYPhot_Core:
      v_mag = []
      for i in range(0,len(t_insmag_V)):
        t_mag.append(t_insmag_V[i] -c_insmag_V[i] + magc_cat)
+       t_mag.append(t_insmag_V[i] -v_insmag_V[i] + magv_cat)
        v_mag.append(v_insmag_V[i] -c_insmag_V[i] + magc_cat)     
    
-     self.t_mag_ave = np.mean(t_mag)
-     self.v_mag_ave = np.mean(v_mag)
+#     self.t_mag_ave = np.mean(t_mag)
+#     self.v_mag_ave = np.mean(v_mag)
      self.t_mag_std = np.std(t_mag)
      self.v_mag_std = np.std(v_mag)
-#     self.t_mag_ave = np.median(t_mag)
-#     self.v_mag_ave = np.median(v_mag)
+     self.t_mag_ave = np.median(t_mag)
+     self.v_mag_ave = np.median(v_mag)
 #     self.t_mag_std = 1.253*np.std(t_mag)/np.sqrt(len(t_mag))
 #     self.v_mag_std = 1.253*np.std(v_mag)/np.sqrt(len(v_mag))
 

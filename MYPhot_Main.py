@@ -48,10 +48,10 @@ parser.add_argument('--showplots',dest='showplots',action='store_true',
 parser.add_argument('--plot_light_curve',dest='plot_light_curve',action='store_true',
                     help='whether plot light curve (useful for planet transits)')
 
-parser.add_argument('--maglim',dest='maglim',required=True,
+parser.add_argument('--maglim',dest='maglim',required=True,type=float,
                     help='magnitude limit for the AAVSO chart for selecting field stars')
 
-parser.add_argument('--magmax',dest='magmax',required=True,
+parser.add_argument('--magmax',dest='magmax',required=True,type=float,
                     help='max mag value for computing magnitude transformation')
 
 # output report

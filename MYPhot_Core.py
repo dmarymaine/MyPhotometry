@@ -67,6 +67,8 @@ class MYPhot_Core:
      self.jd = None
      self.airmass = None
      self.chartid = None
+     self.target_color = 0.7
+     self.valid_color = 0.115
 
 
    def set_output_data(self,files):
@@ -696,8 +698,10 @@ class MYPhot_Core:
      logger.info("Derived params for Johnson-V transformation: V -Tg and (B-V)")
      logger.info(f"Slope = {m1}")
      logger.info(f"Intercept = {b1}")
-        
-     m2, b2 = np.polyfit(ci,b_v,1)
+     self.slope = 1.0507
+     self.zeropoint = b1
+
+     m2, b2 = np.polyfit(b_v,ci,1)
      logger.info("Derived params for Johnson-B transformation: b-v and (B-V)")
      logger.info(f"Slope = {m2}")
      logger.info(f"Intercept = {b2}")
@@ -722,7 +726,7 @@ class MYPhot_Core:
     
      # the required number is m1/m2
      logger.info("Parameter to correct target/comparison measured color") 
-     self.correct_bv = m1/m2
+     self.correct_bv = m1*m2
      logger.info(f"Coeff for Delta(b-v): {self.correct_bv}")
      return self.correct_bv
 
@@ -952,9 +956,9 @@ class MYPhot_Core:
      t_mag = []
      v_mag = []
      for i in range(0,len(t_insmag_V)):
-       t_mag.append(t_insmag_V[i] -c_insmag_V[i] + magc_cat)
-       t_mag.append(t_insmag_V[i] -v_insmag_V[i] + magv_cat)
-       v_mag.append(v_insmag_V[i] -c_insmag_V[i] + magc_cat)     
+       t_mag.append(t_insmag_V[i])# -c_insmag_V[i] + magc_cat)
+       t_mag.append(t_insmag_V[i])# -v_insmag_V[i] + magv_cat)
+       v_mag.append(v_insmag_V[i])# -c_insmag_V[i] + magc_cat)     
    
 #     self.t_mag_ave = np.mean(t_mag)
 #     self.v_mag_ave = np.mean(v_mag)
@@ -988,8 +992,12 @@ class MYPhot_Core:
      delta_b_minus_v = b_minus_v_t - b_minus_v_c
 
      logger.info("Corrected Johnson-V mag")
-     self.JohnV_t = self.t_mag_ave - self.correct_bv*delta_b_minus_v
-     self.JohnV_v = self.v_mag_ave - self.correct_bv*delta_b_minus_v
+     #self.JohnV_t = self.t_mag_ave - self.correct_bv*delta_b_minus_v
+     #self.JohnV_v = self.v_mag_ave - self.correct_bv*delta_b_minus_v
+     print (self.t_mag_ave, self.zeropoint, self.slope,self.target_color)
+     self.JohnV_t = self.t_mag_ave + self.zeropoint + self.slope*self.target_color 
+     self.JohnV_v = self.v_mag_ave + self.zeropoint + self.slope*self.valid_color
+
      logger.info(f"Target - {info[0][0]}: {self.JohnV_t}+/-{self.t_mag_std}")
      logger.info(f"Validation - {info[2][0]}: {self.JohnV_v}+/-{self.v_mag_std}")
 

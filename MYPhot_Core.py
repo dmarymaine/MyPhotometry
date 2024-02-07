@@ -11,13 +11,17 @@ import rawpy
 import pyexiv2
 import json
 import requests
+import scipy
+from scipy.optimize import curve_fit
 from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.time import Time
 from astropy.stats import sigma_clipped_stats, SigmaClip, mad_std
 from photutils.utils import calc_total_error
 from photutils.centroids import centroid_quadratic
+from photutils.aperture import CircularAperture, CircularAnnulus
 from photutils.profiles import RadialProfile
+from PythonPhot import aper
 import astropy.units as u
 from astropy.coordinates import SkyCoord, AltAz, EarthLocation
 from datetime import datetime
@@ -28,6 +32,13 @@ import MYPhot_Logging as log
 logger = log.getLogger("MYPhot_Core")
 pyexiv2.set_log_level(4)
 obscode = "MDAS"
+obs_location = EarthLocation(lat=45.53*u.deg,lon=9.4*u.deg,height=133*u.m)
+
+def fn1(x,a,b):
+  return a + b*x[0]
+
+def fn2(x,a,b,c):
+  return a + b*x[0] + c*x[1]
 
 class MYPhot_Core:
 
@@ -67,8 +78,19 @@ class MYPhot_Core:
      self.JohnV_t = None
      self.JohnV_v = None
      self.jd = None
+     self.data = []
+     self.xmass = []
+     self.result = []
+     self.list_obj = args.list_obj
      self.airmass = None
      self.chartid = None
+     self.slope  = None
+     self.slope1 = None
+     self.slope2 = None
+     self.ZPoint = None
+     self.ZPoint1 = None
+     self.target_bv = None
+     self.target_compar = None
 
 
    def set_output_data(self,files):
@@ -557,18 +579,125 @@ class MYPhot_Core:
     inner = list_aper[1]
     outer = list_aper[2]
 
-    logger.info("Computing Aperture Photometry for all objects in the chart")
+    logger.info("Computing Aperture Photometry for all objects in the user provided list")
     imfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
     imfiles.sort()
 
-    res = self.get_ra_dec_for_objects()
-    for iobj in range(0,self.sources):
-      skycoord = SkyCoord(f"{res[iobj][1]} {res[iobj][2]}",frame='icrs',unit=(u.hourangle,u.deg))
-      for i,ifile in enumerate(imfiles):
-        head = getheader(ifile)
-        wcs = WCS(head)
-        xy = SkyCoord.to_pixel(skycoord,wcs=wcs,origin=1)
+    phot = {}
+    xmass = {}    
+    
+    for i,ifile in enumerate(imfiles):
+       head = fits.getheader(ifile)
+       t = Time(head['DATE-OBS'],format='isot',scale='utc')
+       jd = t.jd
+       t.format = 'fits'
+       wcs = WCS(head)
+       img = fits.getdata(ifile)
+       for iobj in range(0,self.sources):
+         skycoord = SkyCoord(f"{self.result[iobj]['ra']} {self.result[iobj]['dec']}",frame='icrs',unit=(u.hourangle,u.deg))
 
+         # this is for computing airmass for the selected object - computed only once
+         if (filter == 'V'):
+           caltaz = skycoord.transform_to(AltAz(obstime=t,location=obs_location))
+           m = np.float32(caltaz.secz)
+           airmass = self._compute_airmass(m)
+           xmass = {'jd': jd, 'name':self.result[iobj]['name'],'airmass': airmass}
+           self.xmass.append(xmass)
+
+         xy = SkyCoord.to_pixel(skycoord,wcs=wcs,origin=1)
+         mag, magerr, flux, fluxerr, sky, skyerr, badflag, outstr = aper.aper(img,xy[0],xy[1],phpadu=self.gain,
+                            apr=9,zeropoint=0.,skyrad=[12,20],exact=True) 
+         phot = {'jd': jd, 'name':self.result[iobj]['name'],f'{filter}_ins': mag}
+         self.data.append(phot)
+
+   def _compute_mean_mag(self):
+    """
+     Compute mean of instrumental magnitudes for both V and B filters
+    """
+    nsources = self.sources
+    ntimes = len(self.xmass)/nsources
+    mean_V = np.zeros(nsources)
+    mean_B = np.zeros(nsources)
+    mean_X = np.zeros(nsources)
+
+    self.target_compar = np.zeros([2,np.int32(ntimes)])
+    for iobj in range(0,2):
+      name = self.data[iobj]['name']
+      i = 0
+      for id in self.data:
+        if id['name'] == name:
+          self.target_compar[iobj][i] = np.float32(id.get('V_ins'))
+          i = i + 1
+
+    for iobj in range(0,nsources):
+      name = self.data[iobj]['name']
+      for id in self.data:
+        if id['name'] == name:
+          key = id.get('V_ins')
+          if key is not None:
+            mean_V[iobj] = mean_V[iobj] + id['V_ins']
+          key = id.get('B_ins')
+          if key is not None:
+            mean_B[iobj] = mean_B[iobj] + id['B_ins']   
+
+    for iobj in range(0,nsources):
+      name = self.xmass[iobj]['name']
+      for id in self.xmass:
+        if id['name'] == name:
+          mean_X[iobj] = mean_X[iobj]+ id['airmass']
+
+    print (self.target_compar)
+    return mean_V/ntimes, mean_B/ntimes, mean_X/ntimes
+
+   def _extract_b_v(self):
+    """
+     extract B-V for all sources
+    """
+    nsources = self.sources
+    B_V = np.zeros(nsources)
+    V_cat = np.zeros(nsources)
+    for iobj in range(0,nsources):
+      name = self.result[iobj]['name']
+      for id in self.result:
+        if id['name'] == name:
+          B_V[iobj] = id.get('B-V')
+          V_cat[iobj] = id.get('V')
+    return V_cat,B_V
+
+   def do_transf_extin(self):
+    """ 
+     Perform magnitude transformation and extinction
+     In order to do linear fits compute the mean value of all the quantities (V_ins, B_ins and Xmass)
+    """
+
+    mean_V, mean_B, mean_X = self._compute_mean_mag()
+    
+    # the first two soures are target and comparison. These are not used for the
+    # derivation of transformation
+
+    V_Cat, B_V_Cat = self._extract_b_v()
+    
+    # estimate B-V of the target
+    b_v = mean_B - mean_V
+    y = np.array(B_V_Cat[1:])
+    A = np.vstack([b_v[1:],np.ones(len(y))]).T
+    b,a = np.linalg.lstsq(A,y,rcond=None)[0]
+    self.target_bv = a + b*b_v[0]
+    logger.info(f"Estimated Target Colour Index (B-V) = {self.target_bv}")
+
+    # fit only transformation
+    y_TX = np.array(V_Cat[2:] - mean_V[2:])
+    x_TX = np.array(B_V_Cat[2:])
+    A = np.vstack([x_TX,np.ones(len(x_TX))]).T
+    self.slope,self.ZPoint = np.linalg.lstsq(A,y_TX,rcond=None)[0]
+    logger.info(f"Results for Transformation only: slope = {self.slope} and ZeroPoint = {self.ZPoint}")
+
+    # fit with extintion
+    x_TX = np.array([B_V_Cat[2:],mean_X[2:]])
+    A = x_TX.T
+    A = np.c_[A,np.ones(A.shape[0])]
+    self.slope1,self.slope2,self.ZPoint1 = np.linalg.lstsq(A,y_TX,rcond=None)[0]
+    logger.info(f"Results for Transformation and Extintion : slope1 = {self.slope1}, slope2 ={self.slope2} and ZeroPoint = {self.ZPoint1}")
 
 
    def compute_allobject_photometry(self,filter):
@@ -587,7 +716,7 @@ class MYPhot_Core:
     self.set_output_data(filter)
 
     logger.info("Computing Aperture Photometry for all the objects")
-    cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits")
+    cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits ")
     cfiles.sort()
 
     for i,ifile in enumerate(cfiles):
@@ -747,15 +876,32 @@ class MYPhot_Core:
       info = json.load(f)
 
     star_name = info[0][0]
-    result = []
-    vsp_template = 'https://www.aavso.org/apps/vsp/api/chart/?format=json&fov=120&star={}&maglimit={}'
+    star_ra = info[0][1]
+    star_dec = info[0][2]
+    
+    res_dict = {}
+    tdict = {'name':star_name,'ra':star_ra,'dec':star_dec,'V': 0.0, 'B': 0.0, 'B-V': 0.0}
+    self.result.append(tdict)
+    logger.info(f"Get comparison/check stars for {star_name}")
+    vsp_template = 'https://www.aavso.org/apps/vsp/api/chart/?format=json&fov=180&star={}&maglimit={}'
     query = vsp_template.format(star_name,self.maglim)
     record = requests.get(query).json()
     self.chartid = record['chartid']
-    [result.append([d['auid'],d['ra'],d['dec'],d['bands'][0]['mag'],d['bands'][1]['mag']]) for d in record["photometry"]]
-    self.sources = len(result)
+    for id in self.list_obj:
+      for item in record['photometry']:
+        if item['auid'] == id:
+          for key in item:
+            if key == 'bands':
+              for d in item[key]:
+                if d['band'] == 'V':
+                  magv = d['mag']
+                if d['band'] == 'B':
+                  magb = d['mag']
+          res_dict = {'name': item['auid'],'ra':item['ra'],'dec':item['dec'],'V':magv,'B':magb,'B-V':np.float32("{:.3f}".format(magb-magv))}
+      self.result.append(res_dict)
 
-    return result
+    self.sources = len(self.result)
+
 
    def get_target_comp_valid_photometry(self,filter):
      """

@@ -54,6 +54,9 @@ parser.add_argument('--maglim',dest='maglim',required=True,
 parser.add_argument('--magmax',dest='magmax',required=True,
                     help='max mag value for computing magnitude transformation')
 
+parser.add_argument('--list_obj',dest='list_obj_file',required=True,
+                    help='list of object to be considered as comparison/check stars')
+
 # output report
 parser.add_argument('--aavso',dest='aavso',action='store_true',
                     help='whether produce an aavso output file')
@@ -79,6 +82,10 @@ with open(target_json,'r') as f:
 with open(apertures_json,'r') as f:
    apertures = json.load(f)
 
+with open(args.list_obj_file,'r') as f:
+   list_obj = json.load(f)
+
+args.list_obj = list_obj
 myphot = MYPhot_Core(args)
 
 # the exec is only either for the preprocessing step or to 
@@ -90,49 +97,21 @@ filters = ['V','B']
   
 # now create circular apertures around the target, comparison and 
 # validation stars.
-files = glob.glob(f"{args.workdir}/Solved/wcs*{filters[0]}*.fits")
-myphot.set_output_data(files)
+#files = glob.glob(f"{args.workdir}/Solved/wcs*{filters[0]}*.fits")
+#myphot.set_output_data(files)
 
 # compute photometry for all objects (creating catalogs)
+myphot.get_ra_dec_for_objects()
+
 for filter in filters:
   myphot.compute_allobject_photometry_image(filter)
 
-# new compute the transformation from TG to Johnson-V mag
-coeff = myphot.get_first_tramsformation()
+myphot.do_transf_extin()
 
-for filter in filters:
-  myphot.get_target_comp_valid_photometry(filter)
-
-# now create a plot of one image with apertures
-for filter in filters:
-  myphot.show_apertures(filter)
-
-# now plot radial profile to check which aperture is optimal
-#for filter in filters:
-#  myphot.show_radial_profiles(filter)
-
-# user can specify the radius for proper photometry
-with open(apertures_json,'r') as f:
-   radii = json.load(f)
-
-logger.info(f"You can select radius among {radii}")   
-radius_str = input("Enter the radius value: ")
-
-radius = int(radius_str)
-
-idx = radii.index(radius)
-logger.info(f"Optimal selected radius is {radius} pixels #{idx+1} in the list")
-
-logger.info("Computing magnitudes")
-myphot.calculate_mag(idx)
-
-if (args.plot_light_curve):
-  logger.info("Plotting light curve")
-  myphot.plot_light_curve(idx)
-
-if (args.aavso):
-  logger.info("Creating report for AAVSO submission")
-  myphot.aavso()
+# now that we have all transformation we can take the target and
+# comparison stars data (instrumental mags and airmass) and
+# get the final mag estimate
+myphot.get_final_estimation()
 
 logger.info("Done")
 

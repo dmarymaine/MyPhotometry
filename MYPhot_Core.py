@@ -77,10 +77,11 @@ class MYPhot_Core:
      self.v_mag_std = None
      self.JohnV_t = None
      self.JohnV_v = None
-     self.jd = None
+     self.jd = []
      self.data = []
      self.xmass = []
      self.result = []
+     self.check_V = []
      self.list_obj = args.list_obj
      self.airmass = None
      self.chartid = None
@@ -606,7 +607,7 @@ class MYPhot_Core:
 
          xy = SkyCoord.to_pixel(skycoord,wcs=wcs,origin=1)
          mag, magerr, flux, fluxerr, sky, skyerr, badflag, outstr = aper.aper(img,xy[0],xy[1],phpadu=self.gain,
-                            apr=9,zeropoint=0.,skyrad=[12,20],exact=True) 
+                            apr=9,zeropoint=0.,skyrad=[12,16],exact=True) 
          phot = {'jd': jd, 'name':self.result[iobj]['name'],f'{filter}_ins': mag}
          self.data.append(phot)
 
@@ -682,11 +683,10 @@ class MYPhot_Core:
     v_inst_compar = self.target_compar[1][:]
     airmass_target = self.target_compar[2][:]
     airmass_compar = self.target_compar[3][:]
-    jd = []
     name = self.xmass[0]['name']
     for id in self.xmass:
       if id['name'] == name:
-        jd.append((id.get('jd')))
+        self.jd.append((id.get('jd')))
     
     v_target = self.slope1 * self.target_bv + self.slope2 * airmass_target + v_inst_target + self.ZPoint1
     v_compar = self.slope1 * B_V_Cat[1] + self.slope2 * airmass_compar + v_inst_compar + self.ZPoint1
@@ -694,9 +694,14 @@ class MYPhot_Core:
     logger.info("Report Target and Comparison star transformed magnitudes")
     logger.info("Target                      Compar")
     for i in range(0,len(v_target)):
-      print (f"       {jd[i]}   {airmass_target[i]}   {v_target[i]}    {airmass_compar[i]}    {v_compar[i]}")
+      print (f"       {self.jd[i]}   {airmass_target[i]}   {v_target[i]}    {airmass_compar[i]}    {v_compar[i]}")
 
-    logger.info(f"Mean/Std values for jd {np.mean(jd)}")
+    self.JohnV_t = np.median(v_target)
+    self.JohnV_v = np.median(v_compar)
+    self.JohnV_t_std = 1.253*np.std(v_target)/np.sqrt(len(v_target))
+    self.JohnV_v_std = 1.253*np.std(v_compar)/np.sqrt(len(v_compar))
+
+    logger.info(f"Mean/Std values for jd {np.mean(self.jd)}")
     logger.info(f"Target: {np.median(v_target)} +/- {1.253*np.std(v_target)/np.sqrt(len(v_target))}")
     logger.info(f"Comparison: {np.median(v_compar)} +/- {1.253*np.std(v_compar)/np.sqrt(len(v_compar))}")
 
@@ -736,170 +741,14 @@ class MYPhot_Core:
     self.slope1,self.slope2,self.ZPoint1 = np.linalg.lstsq(A,y_TX,rcond=None)[0]
     logger.info(f"Results for Transformation and Extintion : slope1 = {self.slope1}, slope2 ={self.slope2} and ZeroPoint = {self.ZPoint1}")
 
-
-   def compute_allobject_photometry(self,filter):
-    """ 
-      Compute all objects photometry. For each calibrated frames
-      - detector sources
-      - compute background and errors
-      - defined apertures
-      - get photometry for all objects 
-      - save results to a catalog
-    """
-    with open(self.apertures,'r') as f:
-      aper_radii = json.load(f)
-
-    self.naper = len(aper_radii)
-    self.set_output_data(filter)
-
-    logger.info("Computing Aperture Photometry for all the objects")
-    cfiles = glob.glob(f"{self.workdir}/Solved/wcs*{filter}*.fits ")
-    cfiles.sort()
-
-    for i,ifile in enumerate(cfiles):
-      logger.info(f"aperture photometry for {i+1}/{len(cfiles)} - {ifile}")
-      basename = os.path.basename(ifile)
-      rootname,_ = os.path.splitext(basename)
-      catfile = f'cat_{rootname[4:]}.fits'
-      if os.path.exists(f'{self.workdir}/Solved/{catfile}'):
-        logger.info(f"Catalog {catfile} already created - skipit")
-      else: 
-        data = fits.getdata(ifile)
-
-        # mask to get background estimation
-        sigma_clip = SigmaClip(sigma=3)
-        mask = pht.make_source_mask(data,nsigma=3,npixels=5,dilate_size=10)
-        bkg_estimator = pht.SExtractorBackground()
-        bkg = pht.Background2D(data,(64,64),mask=mask,filter_size=(3,3),sigma_clip=sigma_clip,
-              bkg_estimator=bkg_estimator)
-
-        if (self.showplots and i == 1):
-          f,axs = plt.subplots(1,2,figsize=(16,8))
-          axs[0].imshow(bkg.background,origin='lower')
-          axs[0].set_title("background")
-          axs[1].imshow(bkg.background_rms,origin='lower')
-          axs[1].set_title("background rms")
-          plt.show(block=True)
-
-        daofind = pht.IRAFStarFinder(fwhm=5.0,threshold=5.*bkg.background_rms_median,exclude_border=True,
-                  sharplo=0.5,sharphi=2.0,roundlo=0.0,roundhi=0.7)
-        sources = daofind(data - bkg.background)
-        positions = [(ix,iy) for ix,iy in zip(sources['xcentroid'],sources['ycentroid'])]
-        apert = [pht.CircularAperture(positions,r=r) for r in aper_radii]
-        error = calc_total_error(data-bkg.background,bkg.background_rms,self.gain)
-        aper_phot = pht.aperture_photometry(data - bkg.background,apert,error=error)
-      
-        aper_phot.write(f'{self.workdir}/Solved/{catfile}',overwrite=True)
-
-   def get_first_tramsformation(self):
-     """
-     This function returns the first transformation to get Johnson-V mags
-     It stars from the TG and TB photometry of a set of stars (those with
-     mag lower than the saturation)
-     """
-     # get name, position and catalog V and B mag for list of stars
-     res = self.get_ra_dec_for_objects()
-
-     # for each star compute the color index (B-V)
-     star_names = []
-     cat_V_mag=[]
-     color_index = []
-     star_coord = []
-     for istar in range(len(res)-8,len(res)):
-       star_names.append(res[istar][0])
-       star_coord.append(SkyCoord([f"{res[istar][1]} {res[istar][2]}"],frame='icrs',unit=(u.hourangle,u.deg)))
-       color_index.append(res[istar][4]-res[istar][3])
-       cat_V_mag.append(res[istar][3])
-
-     # now get instrumental mag for this set of stars  
-     catfiles_V = glob.glob(f"{self.workdir}/Solved/cat*V*.fits")
-     catfiles_V.sort()
-     catfiles_B = glob.glob(f"{self.workdir}/Solved/cat*B*.fits")
-     catfiles_B.sort()
-
-     V_meanTG = []
-     b_v = []
-     for i in range(0,len(star_names)):
-       temp_G = []
-       temp_B = []
-       for j in range(len(catfiles_V)):
-         vfile = catfiles_V[j]
-         bfile = catfiles_B[j]
-         #logger.info(f"reading catfiles {j+1}/{len(catfiles_V)} - {vfile}")
-         basename_V = os.path.basename(vfile)
-         rootname,_ = os.path.splitext(basename_V)
-         sciframe_V = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
-         basename_B = os.path.basename(bfile)
-         rootname,_ = os.path.splitext(basename_B)
-         sciframe_B = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
-
-         #logger.info("creating WCS for the selected catalog")
-         head = fits.getheader(sciframe_V+".fits")
-         w_V = WCS(head)
-         head = fits.getheader(sciframe_B+".fits")
-         w_B = WCS(head)
-         # open the catalog
-         cat_V = fits.getdata(vfile)
-         xc_V = cat_V['xcenter']
-         yc_V = cat_V['ycenter']
-         cat_B = fits.getdata(bfile)
-         xc_B = cat_B['xcenter']
-         yc_B = cat_B['ycenter']
-
-         x_V,y_V = w_V.world_to_pixel(star_coord[i])
-         x_B,y_B = w_B.world_to_pixel(star_coord[i])
-         d_V = np.sqrt((xc_V-x_V)**2 + (yc_V-y_V)**2)
-         d_B = np.sqrt((xc_B-x_B)**2 + (yc_B-y_B)**2)
-         idxV = np.argmin(d_V)
-         icat_V=cat_V[idxV]
-         idxB = np.argmin(d_B)
-         icat_B=cat_B[idxB]
-         if d_V[idxV] <4 and d_B[idxB] < 4:
-           # now compute the instrumental mag
-           innerV = icat_V['aperture_sum_3']
-           outerV = icat_V['aperture_sum_6']-icat_V['aperture_sum_5']
-           innerB = icat_B['aperture_sum_3']
-           outerB = icat_B['aperture_sum_6']-icat_B['aperture_sum_5']
-           temp_G.append(-2.5*np.log10(innerV-outerV))
-           temp_B.append(-2.5*np.log10(innerB-outerB))
-
-       V_meanTG.append(cat_V_mag[i] - np.mean(temp_G))    
-       b_v.append(np.mean(temp_B)-np.mean(temp_G))
-
-     # now fit V_cat - mean_TG and (B_cat-V_cat)
-     m1, b1 = np.polyfit(color_index,V_meanTG,1)
-     logger.info("Derived params for Johnson-V transformation: V -Tg and (B-V)")
-     logger.info(f"Slope = {m1}")
-     logger.info(f"Intercept = {b1}")
-        
-     m2, b2 = np.polyfit(color_index,b_v,1)
-     logger.info("Derived params for Johnson-B transformation: b-v and (B-V)")
-     logger.info(f"Slope = {m2}")
-     logger.info(f"Intercept = {b2}")
-
-     if self.showplots:
-      fig,ax = plt.subplots(1,2,figsize=(16,8))
-      poly = np.poly1d([m1,b1])
-      newx = np.linspace(color_index[0],color_index[-1])
-      newy = poly(newx)
-      ax[0].plot(color_index,V_meanTG,'o',newx,newy)
-      ax[0].text(newx[-10],newy[-2],"Slope = {:0.2f}".format(m1))
-      ax[0].set_xlabel("B-V",fontsize=20)
-      ax[0].set_ylabel("V-v",fontsize=20)
-
-      poly = np.poly1d([m2,b2])
-      newy = poly(newx)
-      ax[1].plot(color_index,b_v,'o',newx,newy)
-      ax[1].text(newx[2],newy[-2],"Slope = {:0.2f}".format(m2))
-      ax[1].set_xlabel("B-V",fontsize=20)
-      ax[1].set_ylabel("b-v",fontsize=20)
-      plt.show(block=False)
-    
-     # the required number is m1/m2
-     logger.info("Parameter to correct target/comparison measured color") 
-     self.correct_bv = m1/m2
-     logger.info(f"Coeff for Delta(b-v): {self.correct_bv}")
-     return self.correct_bv
+    # print validation check on the validation stars
+    for i in range(2,len(V_Cat)):
+      v = B_V_Cat[i]*self.slope1 + mean_X[i]*self.slope2 + self.ZPoint1 + mean_V[i]
+      self.check_V.append(v)
+      v_str = "{:.4f}".format(v)
+      VC = "{:.4f}".format(V_Cat[i])
+      DV = "{:.4f}".format(np.fabs(V_Cat[i] - v))
+      logger.info(f"{self.data[i]['name']}: V_mag = {v_str}  Cat V_mag = {VC}  ABS = {DV}")
 
    def get_ra_dec_for_objects(self):
     """
@@ -938,122 +787,6 @@ class MYPhot_Core:
       self.result.append(res_dict)
 
     self.sources = len(self.result)
-
-
-   def get_target_comp_valid_photometry(self,filter):
-     """
-     Get photometry for the target, comparison and validation stars
-     It uses the catalog produced in comput_allobject_photometry
-     and the WCS from the solved light frames.
-     From WCS and T,C and V stars coordinates it gets the (x,y) on the frame
-     and select the nearest object in the catalog
-     It returns arrays for T,C and V with JD and photometry results
-     """
-
-     if filter == 'V':
-       idfilter = 0
-     if filter == 'B':
-       idfilter = 1
-
-     catfiles = glob.glob(f"{self.workdir}/Solved/cat*{filter}*.fits")
-     catfiles.sort()
-
-     with open(self.target,'r') as f:
-        info = json.load(f)
-    
-     target_name = info[0][0]
-     compar_name = info[1][0]
-     valide_name = info[2][0]
-
-     t_coord = SkyCoord([f"{info[0][1]} {info[0][2]}"],frame='icrs',unit=(u.hourangle,u.deg))
-     c_coord = SkyCoord([f"{info[1][1]} {info[1][2]}"],frame='icrs',unit=(u.hourangle,u.deg))
-     v_coord = SkyCoord([f"{info[2][1]} {info[2][2]}"],frame='icrs',unit=(u.hourangle,u.deg))
-
-     logger.info("Selected objects with coordinates:")
-     logger.info(f"Target {target_name} = {t_coord}")
-     logger.info(f"Comparison {compar_name} = {c_coord}")
-     logger.info(f"Validation {valide_name} = {v_coord}")
-
-     with open(self.apertures,'r') as g:
-       aper_radii = json.load(g)
-
-     naper = len(aper_radii)
- 
-     # 
-     # now loop over the catalogs, read WCS from calibrated frames and get required stars
-     for i,ifile in enumerate(catfiles):
-        logger.info(f"reading catfiles {i+1}/{len(catfiles)} - {ifile}")
-        basename = os.path.basename(ifile)
-        rootname,_ = os.path.splitext(basename)
-        #remove the last 4 spaces from file name to get the calibrated frame
-        sciframe = f'{self.workdir}/Solved/wcs_{rootname[4:]}'
-
-        # read sci header, create WCS and get (x,y) for T,C and V stars
-        logger.info("creating WCS for the selected catalog")
-        head = fits.getheader(sciframe+".fits")
-        w = WCS(head)
-        x,y = w.world_to_pixel(t_coord)
-        self.x_t[i,idfilter] = x
-        self.y_t[i,idfilter] = y
-        x,y = w.world_to_pixel(c_coord)
-        self.x_c[i,idfilter] = x
-        self.y_c[i,idfilter] = y
-        x,y= w.world_to_pixel(v_coord)
-        self.x_v[i,idfilter] = x
-        self.y_v[i,idfilter] = y
-        
-        head_cat = fits.getheader(ifile)
-        datestr = head['DATE-OBS']
-        t = Time(datestr,format='isot',scale='utc')
-        jd = t.jd
-        self.out_target[0,i,idfilter] = jd
-        self.out_compar[0,i,idfilter] = jd
-        self.out_valide[0,i,idfilter] = jd
-
-        airmass = head['AIRMASS']
-        self.airmass[i] = airmass
-        # now find the nearest to T,C and V star in catalog
-        # Target
-        cat = fits.getdata(ifile)
-        x = cat['xcenter']
-        y = cat['ycenter']
-        d_t = np.sqrt((x-self.x_t[i,idfilter])**2 + (y-self.y_t[i,idfilter])**2)
-        idx = np.argmin(d_t)
-        icat=cat[idx]
-        dt = d_t[idx]
-        if dt<4:
-          for j in range(naper):
-            self.out_target[j+1,i,idfilter]=icat['aperture_sum_'+str(j)]
-            self.out_target[naper+j+1,i,idfilter]=icat['aperture_sum_err_'+str(j)]
-        else:
-          self.out_target[1:,i,idfilter]=np.nan
-          print (f"T:Not found in {i} since distance = {dt}")
-        #
-        # Comparison
-        d_c = np.sqrt((x-self.x_c[i,idfilter])**2 + (y-self.y_c[i,idfilter])**2)
-        idx = np.argmin(d_c)
-        icat=cat[idx]
-        dc = d_c[idx]
-        if dc<4:
-          for j in range(naper):
-            self.out_compar[j+1,i,idfilter]=icat['aperture_sum_'+str(j)]
-            self.out_compar[naper+j+1,i,idfilter]=icat['aperture_sum_err_'+str(j)]
-        else:
-          self.out_compar[1:,i,idfilter]=np.nan
-          print (f"C:Not found in {i} since distance = {dc}")
-        #  
-        #  Validation
-        d_v = np.sqrt((x-self.x_v[i,idfilter])**2+(y-self.y_v[i,idfilter])**2)
-        idx = np.argmin(d_v)
-        icat = cat[idx]
-        dv = d_v[idx]
-        if dv < 4:
-          for j in range(naper):
-            self.out_valide[j+1,i,idfilter]=icat['aperture_sum_'+str(j)]
-            self.out_valide[naper+j+1,i,idfilter]=icat['aperture_sum_err_'+str(j)]
-        else:
-          self.out_valide[1:,i,idfilter] = np.nan
-          print (f"V:Not found in {i} since distance = {dv}")
 
    def show_apertures(self,filter):
      """
@@ -1117,72 +850,6 @@ class MYPhot_Core:
      plt.ylabel(f'Normalize Radial Profile for filter {filter}',fontsize=20)
      plt.show(block=False)
 
-   def calculate_mag(self,iaper):
-     """
-     Function to calculate instrumental magnitudes
-     for target, comparisons and validation stars
-     """
-     with open(self.target,'r') as f:
-      info = json.load(f)
-     
-     magc_cat = info[1][3]
-     naper = np.int32(0.5*(len(self.out_target[:,0,0])-1))
-     logger.info(f"Number of apertures used for photometry {naper}")
-     t_insmag_V = []
-     c_insmag_V = []
-     v_insmag_V = []
-     for i in range(0,len(self.out_target[iaper,:,0])):
-       if np.isfinite(self.out_target[iaper+1,i,0]) and np.isfinite(self.out_compar[iaper+1,i,0]) and np.isfinite(self.out_valide[iaper+1,i,0]):
-        anulus = self.out_target[naper-1,i,0] - self.out_target[naper-2,i,0]
-        t_insmag_V.append(-2.5*np.log10(self.out_target[iaper+1,i,0]-anulus))
-        anulus = self.out_compar[naper-1,i,0] - self.out_compar[naper-2,i,0]
-        c_insmag_V.append(-2.5*np.log10(self.out_compar[iaper+1,i,0]-anulus))
-        anulus = self.out_valide[naper-1,i,0] - self.out_valide[naper-2,i,0]
-        v_insmag_V.append(-2.5*np.log10(self.out_valide[iaper+1,i,0]-anulus))
-
-     t_mag = []
-     v_mag = []
-     for i in range(0,len(t_insmag_V)):
-       t_mag.append(t_insmag_V[i] -c_insmag_V[i] + magc_cat)
-       v_mag.append(v_insmag_V[i] -c_insmag_V[i] + magc_cat)     
-   
-     self.t_mag_ave = np.mean(t_mag)
-     self.v_mag_ave = np.mean(v_mag)
-     self.t_mag_std = np.std(t_mag)
-     self.v_mag_std = np.std(v_mag)
-#     self.t_mag_ave = np.median(t_mag)
-#     self.v_mag_ave = np.median(v_mag)
-#     self.t_mag_std = 1.253*np.std(t_mag)/np.sqrt(len(t_mag))
-#     self.v_mag_std = 1.253*np.std(v_mag)/np.sqrt(len(v_mag))
-
-     self.jd = np.mean(self.out_target[0,:,0])
-     logger.info(f"JD: {np.mean(self.out_target[:,0,0])}")
-     logger.info("Derived Magnitudes")
-     logger.info(f"Target - {info[0][0]}: {self.t_mag_ave}+/-{self.t_mag_std}")
-     logger.info(f"Validation - {info[2][0]}: {self.v_mag_ave}+/-{self.v_mag_std}")
-
-     # get b-v for target and comparison
-     #anulus_t_B = self.out_target[outer+1,:,1]-self.out_target[inner+1,:,1]
-     #anulus_c_B = self.out_compar[outer+1,:,1]-self.out_compar[inner+1,:,1]
-     t_insmag_B = []
-     c_insmag_B = []
-     for i in range(0,len(self.out_target[iaper,:,1])):
-      if (np.isfinite(self.out_target[iaper,i,1]) and np.isfinite(self.out_compar[iaper+1,i,1])):
-       anulus = self.out_target[naper-1,i,1] - self.out_target[naper-2,i,1]
-       t_insmag_B.append(-2.5*np.log10(self.out_target[iaper+1,i,1]-anulus))
-       anulus = self.out_compar[naper-1,i,1] - self.out_compar[naper-2,i,1]
-       c_insmag_B.append(-2.5*np.log10(self.out_compar[iaper+1,i,1]-anulus))
-
-     b_minus_v_t = np.mean(t_insmag_B) - np.mean(t_insmag_V)     
-     b_minus_v_c = np.mean(c_insmag_B) - np.mean(c_insmag_V)
-     delta_b_minus_v = b_minus_v_t - b_minus_v_c
-
-     logger.info("Corrected Johnson-V mag")
-     self.JohnV_t = self.t_mag_ave - self.correct_bv*delta_b_minus_v
-     self.JohnV_v = self.v_mag_ave - self.correct_bv*delta_b_minus_v
-     logger.info(f"Target - {info[0][0]}: {self.JohnV_t}+/-{self.t_mag_std}")
-     logger.info(f"Validation - {info[2][0]}: {self.JohnV_v}+/-{self.v_mag_std}")
-
    def plot_light_curve(self,iaper):
     """
      Plot the light curves of target, comparison and validation
@@ -1229,10 +896,10 @@ class MYPhot_Core:
       info = json.load(f)
 
     result_template = "{0},{1:1.6f},{2:1.6f},{3:1.6f},{4},YES,STD,{5},{6:1.6f},{7},{8:1.6f},{9},NA,{10},{11}\n"
-    with open(f"{self.workdir}/webobs_{info[0][0]}_{self.jd}.csv",'w') as webobs:
+    with open(f"{self.workdir}/webobs_{info[0][0]}_{np.mean(self.jd)}.csv",'w') as webobs:
       webobs.write(header_template.format(obscode,"MYPhotometry"))
-      webobs.write(result_template.format(info[0][0],self.jd,self.JohnV_t,self.t_mag_std,"V",
-                           info[1][0],info[1][3],info[2][0],self.v_mag_ave,np.mean(self.airmass),self.chartid," "))
+      webobs.write(result_template.format(info[0][0],np.mean(self.jd),self.JohnV_t,self.JohnV_t_std,"V",
+                           info[1][0],self.JohnV_v,info[2][0],self.check_V[0],np.mean(self.target_compar[3][:]),self.chartid," "))
 
    
    

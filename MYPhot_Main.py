@@ -113,5 +113,7 @@ myphot.do_transf_extin()
 # get the final mag estimate
 myphot.get_final_estimation()
 
+myphot.aavso()
+
 logger.info("Done")
 

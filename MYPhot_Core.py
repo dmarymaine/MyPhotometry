@@ -620,12 +620,12 @@ class MYPhot_Core:
     mean_B = np.zeros(nsources)
     mean_X = np.zeros(nsources)
 
-    self.target_compar = np.zeros([2,np.int32(ntimes)])
+    self.target_compar = np.zeros([5,np.int32(ntimes)])
     for iobj in range(0,2):
       name = self.data[iobj]['name']
       i = 0
       for id in self.data:
-        if id['name'] == name:
+        if id['name'] == name and ('V_ins' in id):
           self.target_compar[iobj][i] = np.float32(id.get('V_ins'))
           i = i + 1
 
@@ -640,13 +640,20 @@ class MYPhot_Core:
           if key is not None:
             mean_B[iobj] = mean_B[iobj] + id['B_ins']   
 
+    for iobj in range(0,2):
+      name = self.data[iobj]['name']
+      i = 0
+      for id in self.xmass:
+        if id['name'] == name:
+          self.target_compar[iobj+2][i] = np.float32(id.get('airmass'))
+          i = i+1
+
     for iobj in range(0,nsources):
       name = self.xmass[iobj]['name']
       for id in self.xmass:
         if id['name'] == name:
           mean_X[iobj] = mean_X[iobj]+ id['airmass']
 
-    print (self.target_compar)
     return mean_V/ntimes, mean_B/ntimes, mean_X/ntimes
 
    def _extract_b_v(self):
@@ -663,6 +670,36 @@ class MYPhot_Core:
           B_V[iobj] = id.get('B-V')
           V_cat[iobj] = id.get('V')
     return V_cat,B_V
+
+   def get_final_estimation(self):
+    """
+     Get the final estimation of the transformed magnitudes for Target and Comparison
+     Do this for all the observations acquired and then report mean + std of the results
+    """
+    V_Cat, B_V_Cat = self._extract_b_v()
+
+    v_inst_target = self.target_compar[0][:]
+    v_inst_compar = self.target_compar[1][:]
+    airmass_target = self.target_compar[2][:]
+    airmass_compar = self.target_compar[3][:]
+    jd = []
+    name = self.xmass[0]['name']
+    for id in self.xmass:
+      if id['name'] == name:
+        jd.append((id.get('jd')))
+    
+    v_target = self.slope1 * self.target_bv + self.slope2 * airmass_target + v_inst_target + self.ZPoint1
+    v_compar = self.slope1 * B_V_Cat[1] + self.slope2 * airmass_compar + v_inst_compar + self.ZPoint1
+
+    logger.info("Report Target and Comparison star transformed magnitudes")
+    logger.info("Target                      Compar")
+    for i in range(0,len(v_target)):
+      print (f"       {jd[i]}   {airmass_target[i]}   {v_target[i]}    {airmass_compar[i]}    {v_compar[i]}")
+
+    logger.info(f"Mean/Std values for jd {np.mean(jd)}")
+    logger.info(f"Target: {np.median(v_target)} +/- {1.253*np.std(v_target)/np.sqrt(len(v_target))}")
+    logger.info(f"Comparison: {np.median(v_compar)} +/- {1.253*np.std(v_compar)/np.sqrt(len(v_compar))}")
+
 
    def do_transf_extin(self):
     """ 

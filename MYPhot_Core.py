@@ -883,14 +883,13 @@ class MYPhot_Core:
     """
     Create the report for AAVSO submittion of the observation
     """
-    header_template = """
-    #TYPE = EXTENDED
-    #OBSCODE = {0}
-    #SOFTWARE = {1}, Python Script - Tested against ASTAP
-    #DELIM = ,
-    #DATE = JD
-    #OBSTYPE = DSLR
-    #NAME,DATE,MAG,MERR,FILT,TRANS,MTYPE,CNAME,CMAG,KNAME,KMAG,AMASS,GROUP,CHART,NOTES
+    header_template = """#TYPE=EXTENDED
+#OBSCODE={0}
+#SOFTWARE={1}, Python Script - Tested against ASTAP
+#DELIM=,
+#DATE=JD
+#OBSTYPE=DSLR
+#NAME,DATE,MAG,MERR,FILT,TRANS,MTYPE,CNAME,CMAG,KNAME,KMAG,AMASS,GROUP,CHART,NOTES
     """
     with open(self.target,'r') as f:
       info = json.load(f)
@@ -898,7 +897,7 @@ class MYPhot_Core:
     result_template = "{0},{1:1.6f},{2:1.4f},{3:1.4f},{4},YES,STD,{5},{6:1.4f},{7},{8:1.4f},{9:1.4f},na,{10},{11}\n"
     with open(f"{self.workdir}/webobs_{info[0][0]}_{np.mean(self.jd)}.csv",'w') as webobs:
       webobs.write(header_template.format(obscode,"MYPhotometry"))
-      webobs.write(result_template.format(info[0][0],np.mean(self.jd),self.JohnV_t,self.JohnV_t_std,"V",
+      webobs.write(result_template.format(info[0][0],np.mean(self.jd),self.JohnV_t,self.JohnV_t_std,"TG",
                            info[1][0],self.JohnV_v,info[2][0],self.check_V[0],np.mean(self.target_compar[3][:]),self.chartid,"na"))
 
    
